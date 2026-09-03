@@ -24,11 +24,16 @@ site/                            source for the resume site image (built by CI)
 Assumes microk8s is installed and running on all three Pis, with a single
 `kubectl`/`helm3` context pointed at the cluster.
 
-1. Enable required microk8s addons:
+1. Enable required microk8s addons — and **disable the ingress addon**:
 
    ```sh
    microk8s enable dns hostpath-storage helm3
+   microk8s disable ingress          # Traefik is managed from this repo instead
    ```
+
+   Leaving the addon on means two ingress controllers fighting for :80/:443,
+   and two IngressClasses both marked default — at which point any Ingress
+   without an explicit `className` becomes ambiguous.
 
 2. Install ArgoCD via Helm, using the same chart version and values this
    repo uses to manage ArgoCD afterwards:
@@ -60,9 +65,6 @@ Assumes microk8s is installed and running on all three Pis, with a single
    `prometheus` is the slow one: it installs the Prometheus Operator CRDs
    first, and on Pi hardware the whole stack can take several minutes to go
    Healthy. `Progressing` is expected for a while.
-
-   Do **not** also run `microk8s enable ingress` — that installs a second
-   ingress controller which will fight Traefik for ports 80/443.
 
 From here, all changes - including upgrading ArgoCD itself - go through
 git: edit a manifest, commit, push, let ArgoCD sync.

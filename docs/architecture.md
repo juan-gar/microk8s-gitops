@@ -52,7 +52,7 @@ instead of fighting a differently-configured install.
 | --- | --- | --- |
 | ArgoCD | `platform/argocd.yaml` | manages itself |
 | Traefik | `platform/traefik.yaml` | DaemonSet, hostPort 80/443 |
-| kube-prometheus-stack | `platform/prometheus.yaml` | Prometheus + node-exporter + kube-state-metrics; Grafana and Alertmanager off |
+| kube-prometheus-stack | `platform/prometheus.yaml` | Prometheus + Grafana + node-exporter + kube-state-metrics; Alertmanager off |
 | resume site | `apps/resume.yaml` → `apps/resume/` | image built from `site/`; queries Prometheus through a same-origin proxy |
 
 ### Traefik
@@ -62,18 +62,39 @@ because there is no LoadBalancer implementation on bare metal until MetalLB is
 scaffolded. One Traefik per node means any Pi's IP serves the cluster's
 Ingresses, so DNS can point at any of them.
 
-microk8s also ships an nginx-based `ingress` addon. Running both is a
-conflict: two controllers claiming the same Ingress objects and both wanting
-:80/:443 on the host. This repo standardises on Traefik.
+microk8s also ships an nginx-based `ingress` addon, and this cluster had it
+enabled. It must be turned off (`microk8s disable ingress`): two controllers
+claiming the same Ingress objects and both wanting :80/:443 is a conflict, and
+both mark their IngressClass as default — leaving two defaults, at which point
+any Ingress without an explicit `className` is ambiguous.
+
+Always set `spec.ingressClassName` explicitly anyway, as `apps/resume` and the
+Grafana values do. It costs nothing and survives this kind of mistake.
 
 ### Prometheus
 
 kube-prometheus-stack rather than the bare prometheus chart, because the
 bundle also brings node-exporter (node CPU/memory series) and
-kube-state-metrics (`kube_*` series). Grafana and Alertmanager are disabled to
-save memory, and the control-plane scrape targets microk8s does not expose
-(scheduler, controller-manager, proxy, etcd) are turned off so the targets
-page stays honest.
+kube-state-metrics (`kube_*` series) — the latter being what the resume site's
+pod count, deployments table and node roles depend on.
+
+**This replaces a hand-rolled monitoring stack** that lived in the `monitoring`
+namespace: a plain Prometheus Deployment driven by a `prometheus-config`
+ConfigMap, plus Grafana and a node-exporter DaemonSet, none of it in git. It
+was deleted deliberately so that monitoring is managed here like everything
+else. Two consequences worth recording:
+
+- Dashboards from the old Grafana were never in git and did not survive.
+  kube-prometheus-stack provisions the standard Kubernetes dashboards; add
+  custom ones under `grafana.dashboards` in `prometheus-values.yaml` so they
+  are version-controlled from now on.
+- The old stack had no kube-state-metrics at all, so the site's `kube_*`
+  panels could never have worked against it. They do against this one.
+
+Alertmanager stays disabled (no paging setup on a homelab), and the
+control-plane scrape targets microk8s does not expose (scheduler,
+controller-manager, proxy, etcd) are turned off so the targets page stays
+honest.
 
 One relabeling worth knowing about: the node-exporter ServiceMonitor rewrites
 the `instance` label to the node name. Without it, anything querying these
@@ -128,3 +149,33 @@ Two options that matter for real charts, both used by `prometheus.yaml`:
   "metadata.annotations: Too long".
 - `SkipDryRunOnMissingResource=true` — lets the first sync proceed when a
   resource's CRD is installed by that same chart.
+
+## Migrating an unmanaged component into git
+
+The monitoring stack was the first thing to go through this, and the order
+matters. Deleting the old copy and letting ArgoCD install the new one is not
+symmetric — the delete needs a healthy control plane, the install needs a
+healthy control plane *and* a working ArgoCD.
+
+1. **Check the control plane first.** `kubectl delete namespace` is finalised
+   by the namespace controller, which lives in kube-controller-manager. If
+   that controller is not reconciling, the namespace sticks in `Terminating`
+   forever and clearing it means editing finalizers by hand. Verify with a
+   throwaway deployment — if it gets a ReplicaSet within a second or two, the
+   controller is alive:
+
+   ```sh
+   kubectl create deployment ctrltest --image=busybox:1.36 -- sleep 60
+   kubectl get rs -l app=ctrltest        # should be non-empty immediately
+   kubectl delete deployment ctrltest
+   ```
+
+2. **Save anything not in git.** Grafana dashboards, recording rules, and
+   hand-edited ConfigMaps are gone the moment the namespace goes.
+
+3. **Delete the old copy**, then let ArgoCD sync the replacement. The chart
+   recreates the namespace (`CreateNamespace=true`).
+
+4. **Re-check the consumers.** Anything referencing the old Service DNS needs
+   updating — for the resume site that is `prometheus.proxy.url` in
+   `apps/resume/values.yaml`.
