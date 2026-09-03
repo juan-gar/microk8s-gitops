@@ -15,6 +15,7 @@ bootstrap/                       one-time, manually-applied root Application
 clusters/rpi-cluster/platform/   cluster infrastructure (ArgoCD itself, and later ingress/monitoring)
 clusters/rpi-cluster/apps/       workload Applications
 apps/                            the Helm chart backing each workload
+site/                            source for the resume site image
 ```
 
 ## Bootstrapping a fresh cluster
@@ -80,9 +81,17 @@ path.
 
 ### Before the resume app will serve
 
-The chart points at `ghcr.io/juan-gar/resume-web`, which does not exist yet —
-the site source and its image build are not in the repo at this point. Until
-then the Application will sync but the pod cannot pull.
+The chart points at `ghcr.io/juan-gar/resume-web`. The site source lives in
+[`site/`](site/README.md), but nothing builds and pushes that image yet, so
+the Application will sync while the pod fails to pull. Build and push it by
+hand for now:
+
+```sh
+docker buildx build --platform linux/arm64 -t ghcr.io/juan-gar/resume-web:latest --push site
+```
+
+It must be arm64 — an amd64-only image fails on the Pis with
+`exec format error`.
 
 `ingress.hosts[0].host` is `resume.lan`. Traefik runs on every node with
 hostPort 80, so any node's IP works; an `/etc/hosts` entry is enough to test.

@@ -1,0 +1,74 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# SUPERSEDED — kept only as the plain-manifest reference.
+#
+# The deployed definition of this app is now the Helm chart at apps/resume,
+# wired into ArgoCD by clusters/rpi-cluster/apps/resume.yaml. That chart covers
+# all three resources below and adds the Prometheus proxy config, a security
+# context, and probes.
+#
+# Nothing applies this file: ArgoCD's root Application only watches
+# clusters/rpi-cluster, so site/ is never synced. Applying it by hand would
+# create a SECOND, divergent copy of the site in the `web` namespace that
+# ArgoCD does not manage. Don't — delete this file once you're comfortable
+# with the chart.
+#
+# Differences worth noting if you compare the two:
+#   - namespace `web` here vs `resume` in the chart
+#   - name `resume-web` here vs `resume` (release name) in the chart
+#   - a 200m CPU limit here; the chart deliberately sets none (CPU limits
+#     cause throttling, which hurts more than it helps on a 4-core Pi)
+#   - `kubernetes.io/ingress.class` annotation here is the deprecated form;
+#     the chart uses spec.ingressClassName
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: resume-web
+  namespace: web
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: resume-web }
+  template:
+    metadata:
+      labels: { app: resume-web }
+    spec:
+      containers:
+        - name: web
+          image: ghcr.io/YOURUSER/resume-web:latest   # or a local registry
+          ports: [{ containerPort: 8080 }]
+          resources:
+            requests: { cpu: 10m, memory: 24Mi }
+            limits:   { cpu: 200m, memory: 96Mi }
+          readinessProbe:
+            httpGet: { path: /, port: 8080 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: resume-web
+  namespace: web
+spec:
+  selector: { app: resume-web }
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: resume-web
+  namespace: web
+  annotations:
+    kubernetes.io/ingress.class: traefik
+spec:
+  rules:
+    - host: resume.lan            # your host
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: resume-web
+                port: { number: 80 }
