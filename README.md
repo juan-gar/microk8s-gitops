@@ -24,16 +24,21 @@ site/                            source for the resume site image (built by CI)
 Assumes microk8s is installed and running on all three Pis, with a single
 `kubectl`/`helm3` context pointed at the cluster.
 
-1. Enable required microk8s addons — and **disable the ingress addon**:
+1. Enable required microk8s addons:
 
    ```sh
    microk8s enable dns hostpath-storage helm3
-   microk8s disable ingress          # Traefik is managed from this repo instead
    ```
 
-   Leaving the addon on means two ingress controllers fighting for :80/:443,
-   and two IngressClasses both marked default — at which point any Ingress
-   without an explicit `className` becomes ambiguous.
+   Leave the `ingress` addon **disabled** — Traefik is managed from this repo
+   instead. Running both means two controllers fighting for :80/:443, and two
+   IngressClasses both marked default, at which point any Ingress without an
+   explicit `className` is ambiguous.
+
+   Note this cluster still has orphaned `public` and `nginx` IngressClasses
+   from a previous ingress-nginx install with no controller behind them. An
+   Ingress pointed at either is silently served by nothing — always set
+   `className: traefik`.
 
 2. Install ArgoCD via Helm, using the same chart version and values this
    repo uses to manage ArgoCD afterwards:
