@@ -10,6 +10,7 @@ clusters/rpi-cluster/
 apps/<name>/                     the actual Helm chart for each workload (Chart.yaml, values.yaml, templates/)
 site/                            source for the resume site image (built by CI, not synced by ArgoCD)
 .github/workflows/               image build + digest write-back
+docs/rebuild.md                  rebuilding the cluster from scratch
 ```
 
 `site/` is the odd one out: it holds the HTML/CSS and Dockerfile that become
@@ -62,14 +63,33 @@ because there is no LoadBalancer implementation on bare metal until MetalLB is
 scaffolded. One Traefik per node means any Pi's IP serves the cluster's
 Ingresses, so DNS can point at any of them.
 
-microk8s also ships an nginx-based `ingress` addon, and this cluster had it
-enabled. It must be turned off (`microk8s disable ingress`): two controllers
-claiming the same Ingress objects and both wanting :80/:443 is a conflict, and
-both mark their IngressClass as default — leaving two defaults, at which point
-any Ingress without an explicit `className` is ambiguous.
+microk8s also ships an nginx-based `ingress` addon. Leave it disabled: two
+controllers claiming the same Ingress objects and both wanting :80/:443 is a
+conflict, and both mark their IngressClass as default — leaving two defaults,
+at which point any Ingress without an explicit `className` is ambiguous.
 
 Always set `spec.ingressClassName` explicitly anyway, as `apps/resume` and the
 Grafana values do. It costs nothing and survives this kind of mistake.
+
+### The Service type trap
+
+The chart's Service type lives at **`service.spec.type`**, not `service.type`.
+A top-level `service.type` is silently ignored — the values schema accepts the
+stray key and the default (`LoadBalancer`) applies anyway. That is how an
+earlier version of this file ended up putting Traefik on a MetalLB address
+another gateway already held, with overlapping :80/:443.
+
+Since Traefik here is a DaemonSet with `hostPort`, it wants `ClusterIP` and no
+LoadBalancer address at all. Verify after any change to this file:
+
+```sh
+helm template traefik traefik/traefik --version 41.4.0 \
+  -f clusters/rpi-cluster/platform/traefik-values.yaml \
+  | grep -A2 'kind: Service'
+```
+
+The general lesson: a values key that does nothing produces no error anywhere.
+Check the rendered output, not the values file.
 
 ### Prometheus
 
@@ -78,18 +98,13 @@ bundle also brings node-exporter (node CPU/memory series) and
 kube-state-metrics (`kube_*` series) — the latter being what the resume site's
 pod count, deployments table and node roles depend on.
 
-**This replaces a hand-rolled monitoring stack** that lived in the `monitoring`
-namespace: a plain Prometheus Deployment driven by a `prometheus-config`
-ConfigMap, plus Grafana and a node-exporter DaemonSet, none of it in git. It
-was deleted deliberately so that monitoring is managed here like everything
-else. Two consequences worth recording:
+Grafana is enabled and is the only Grafana in the cluster. The chart
+provisions the standard Kubernetes dashboards automatically; add custom ones
+under `grafana.dashboards` in `prometheus-values.yaml` so they are
+version-controlled rather than living only in the pod.
 
-- Dashboards from the old Grafana were never in git and did not survive.
-  kube-prometheus-stack provisions the standard Kubernetes dashboards; add
-  custom ones under `grafana.dashboards` in `prometheus-values.yaml` so they
-  are version-controlled from now on.
-- The old stack had no kube-state-metrics at all, so the site's `kube_*`
-  panels could never have worked against it. They do against this one.
+Do **not** also enable the microk8s `prometheus` addon — it installs a second,
+unmanaged operator.
 
 Alertmanager stays disabled (no paging setup on a homelab), and the
 control-plane scrape targets microk8s does not expose (scheduler,
@@ -150,32 +165,25 @@ Two options that matter for real charts, both used by `prometheus.yaml`:
 - `SkipDryRunOnMissingResource=true` — lets the first sync proceed when a
   resource's CRD is installed by that same chart.
 
-## Migrating an unmanaged component into git
+## Before deleting anything in the cluster
 
-The monitoring stack was the first thing to go through this, and the order
-matters. Deleting the old copy and letting ArgoCD install the new one is not
-symmetric — the delete needs a healthy control plane, the install needs a
-healthy control plane *and* a working ArgoCD.
+Deleting and letting ArgoCD reinstall is not symmetric: the delete needs a
+healthy control plane, the reinstall needs a healthy control plane *and* a
+working ArgoCD. `kubectl delete namespace` in particular is finalised by the
+namespace controller inside kube-controller-manager — if that controller is not
+reconciling, the namespace sticks in `Terminating` forever and clearing it
+means editing finalizers by hand.
 
-1. **Check the control plane first.** `kubectl delete namespace` is finalised
-   by the namespace controller, which lives in kube-controller-manager. If
-   that controller is not reconciling, the namespace sticks in `Terminating`
-   forever and clearing it means editing finalizers by hand. Verify with a
-   throwaway deployment — if it gets a ReplicaSet within a second or two, the
-   controller is alive:
+One command tells you whether the control plane is actually working. A healthy
+controller-manager creates the ReplicaSet within a second or two:
 
-   ```sh
-   kubectl create deployment ctrltest --image=busybox:1.36 -- sleep 60
-   kubectl get rs -l app=ctrltest        # should be non-empty immediately
-   kubectl delete deployment ctrltest
-   ```
+```sh
+kubectl create deployment ctrltest --image=busybox:1.36 -- sleep 60
+kubectl get rs -l app=ctrltest        # non-empty immediately = safe to proceed
+kubectl delete deployment ctrltest
+```
 
-2. **Save anything not in git.** Grafana dashboards, recording rules, and
-   hand-edited ConfigMaps are gone the moment the namespace goes.
-
-3. **Delete the old copy**, then let ArgoCD sync the replacement. The chart
-   recreates the namespace (`CreateNamespace=true`).
-
-4. **Re-check the consumers.** Anything referencing the old Service DNS needs
-   updating — for the resume site that is `prometheus.proxy.url` in
-   `apps/resume/values.yaml`.
+Leases are not a health check. Both the scheduler and controller-manager can
+keep renewing their leader lease while doing no work at all, which means
+leadership never fails over and `kubectl get lease` looks fine while nothing
+reconciles. Test behaviour, not liveness.
