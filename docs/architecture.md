@@ -8,7 +8,8 @@ clusters/rpi-cluster/
   platform/                      cluster-wide infrastructure Applications
   apps/                          workload Applications, one file per app
 apps/<name>/                     the actual Helm chart for each workload (Chart.yaml, values.yaml, templates/)
-site/                            source for the resume site image (not synced by ArgoCD)
+site/                            source for the resume site image (built by CI, not synced by ArgoCD)
+.github/workflows/               image build + digest write-back
 ```
 
 `site/` is the odd one out: it holds the HTML/CSS and Dockerfile that become

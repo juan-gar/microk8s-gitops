@@ -1,0 +1,118 @@
+# Builds site/ into a container image and writes the resulting digest back
+# into apps/resume/values.yaml, which is what makes ArgoCD roll out the new
+# version. That write-back is the whole point: without it you would build an
+# image and then have to remember to bump the tag by hand.
+name: build-site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/build-site.yml"
+  # Manual runs, for rebuilding without a site change (e.g. base image CVEs).
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/resume-web
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      # Push the image to GitHub Container Registry.
+      packages: write
+      # Commit the digest back to apps/resume/values.yaml.
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Pis are arm64 and GitHub's runners are amd64, so the arm64 layer
+      # is built under emulation. This is the step people forget, and the
+      # symptom is a pod that CrashLoopBackOffs with "exec format error".
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ./site
+          push: true
+          # amd64 is included only so the image also runs on your laptop;
+          # arm64 is the one the cluster needs.
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          # Cache layers in the registry so emulated arm64 builds don't take
+          # several minutes every time.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Pin by digest rather than tag. A tag can be moved to point at
+      # different content; a digest cannot, so what git says is deployed is
+      # exactly what is deployed.
+      - name: Write digest into the chart values
+        run: |
+          set -euo pipefail
+          DIGEST='${{ steps.build.outputs.digest }}'
+          echo "Built digest: $DIGEST"
+
+          # Match the `digest:` key inside the image: block only, so an
+          # unrelated "digest:" elsewhere in the file is left alone.
+          python3 - "$DIGEST" <<'PY'
+          import re, sys
+          digest = sys.argv[1]
+          path = "apps/resume/values.yaml"
+          src = open(path).read()
+          new, n = re.subn(
+              r'(^image:\n(?:[ \t]+.*\n)*?[ \t]+digest:[ \t]*)("[^"]*"|\S*)',
+              lambda m: m.group(1) + '"%s"' % digest,
+              src,
+              count=1,
+              flags=re.M,
+          )
+          if n != 1:
+              sys.exit("could not locate image.digest in %s" % path)
+          open(path, "w").write(new)
+          print("updated image.digest")
+          PY
+
+      - name: Commit if changed
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- apps/resume/values.yaml; then
+            echo "digest unchanged, nothing to commit"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/resume/values.yaml
+          # [skip ci] so this commit does not retrigger the workflow. The
+          # paths filter above would already prevent it, but belt and braces.
+          git commit -m "chore: resume-web image ${{ github.sha }} [skip ci]"
+          git push
+
+      - name: Summary
+        run: |
+          {
+            echo "### resume-web built"
+            echo
+            echo '- image: `${{ env.IMAGE }}`'
+            echo '- digest: `${{ steps.build.outputs.digest }}`'
+            echo '- platforms: linux/amd64, linux/arm64'
+            echo
+            echo 'ArgoCD picks up the values.yaml commit on its next reconcile.'
+          } >> "$GITHUB_STEP_SUMMARY"
