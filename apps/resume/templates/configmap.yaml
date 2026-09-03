@@ -1,0 +1,141 @@
+{{- /*
+Config files are just more template output. Nothing about a ConfigMap is
+special to Helm - the nginx.conf below is templated with the same syntax as
+the surrounding YAML, which is why containerPort and the Prometheus URL are
+each set once in values.yaml and cannot drift.
+
+This ConfigMap mounts over /etc/nginx/conf.d, so it REPLACES the nginx.conf
+baked into the image at build time. site/nginx.conf is therefore only used
+when you `docker run` the image locally; in the cluster, this file wins. Keep
+the two roughly in sync so local testing stays representative.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "resume.fullname" . }}-nginx
+  labels:
+    {{- include "resume.componentLabels" (dict "ctx" . "component" "web") | nindent 4 }}
+data:
+  {{- /*
+    `|-` is a YAML block scalar: everything indented below is a literal
+    multi-line string, newlines preserved, trailing newline stripped. This is
+    how you embed a whole config file in YAML without escaping anything.
+
+    Note files in conf.d are included INSIDE nginx's http{} block, which is
+    why limit_req_zone below can sit outside server{} - it is an http-context
+    directive and would be rejected inside a server block.
+  */}}
+  default.conf: |-
+    {{- if .Values.prometheus.proxy.enabled }}
+    # Rate-limit the Prometheus proxy per client IP. The page issues 3 queries
+    # per refresh (every 20s by default), so {{ .Values.prometheus.proxy.rateLimit }}r/s is far above normal
+    # use and only bites on abuse.
+    limit_req_zone $binary_remote_addr zone=promq:1m rate={{ .Values.prometheus.proxy.rateLimit }}r/s;
+    {{- end }}
+
+    server {
+        listen {{ .Values.containerPort }};
+        server_name _;
+
+        root /usr/share/nginx/html;
+        index index.html;
+
+        # Static assets get a long cache; the HTML itself does not, so a
+        # redeploy is visible immediately rather than after a browser cache
+        # expiry you cannot control.
+        location ~* \.(?:css|js|jpg|jpeg|png|gif|ico|svg|woff2?)$ {
+            expires {{ .Values.nginx.assetCacheSeconds }}s;
+            add_header Cache-Control "public, max-age={{ .Values.nginx.assetCacheSeconds }}";
+        }
+    {{- if .Values.prometheus.proxy.enabled }}
+
+        # ── Same-origin Prometheus proxy ──────────────────────────────────
+        # The browser calls /api/v1/query on this host; nginx forwards it to
+        # Prometheus inside the cluster. No CORS preflight, and Prometheus
+        # itself never needs an Ingress.
+        #
+        # DNS GOTCHA, and the reason for the $prom variable below: nginx
+        # resolves a literal hostname in proxy_pass ONCE, at startup. If
+        # Prometheus does not exist yet, nginx fails to start outright and the
+        # pod CrashLoopBackOffs - so deploying this app before the monitoring
+        # stack would break the resume site rather than just the panels.
+        # Putting the upstream in a variable defers resolution to request
+        # time, which needs an explicit resolver. The cost is that nginx no
+        # longer appends the URI automatically, hence $is_args$args.
+        resolver {{ .Values.prometheus.proxy.resolver }} valid=30s ipv6=off;
+        set $prom {{ .Values.prometheus.proxy.url }};
+
+        # Exact-match location: ONLY the instant-query endpoint is reachable.
+        # A prefix `location /api/` would also expose /api/v1/query_range,
+        # /api/v1/series, /federate and the admin endpoints. Narrow it.
+        location = /api/v1/query {
+            limit_except GET { deny all; }
+            limit_req zone=promq burst={{ .Values.prometheus.proxy.rateLimitBurst }} nodelay;
+
+            proxy_pass $prom/api/v1/query$is_args$args;
+            proxy_set_header Host $host;
+            proxy_connect_timeout {{ .Values.prometheus.proxy.connectTimeout }};
+            proxy_read_timeout {{ .Values.prometheus.proxy.readTimeout }};
+
+            # Panel data is live; never let a cache serve it.
+            add_header Cache-Control "no-store" always;
+        }
+    {{- end }}
+
+        location / {
+            # `=404`, not a fallback to /index.html. There is no client-side
+            # router here, so an unknown path is genuinely missing. The SPA
+            # fallback would also make every non-proxied /api/... path return
+            # the resume page with a 200, which is confusing to debug.
+            try_files $uri $uri/ =404;
+            add_header Cache-Control "no-cache";
+        }
+    {{- with .Values.nginx.extraServerConfig }}
+    {{- /*
+      Injecting a user-supplied multi-line string, which is fiddlier than it
+      looks. Two details:
+
+        trimSuffix "\n"  - the `|` block scalar in values.yaml keeps a trailing
+                           newline; without trimming it, nindent emits a final
+                           line of nothing but spaces.
+        nindent 8        - newline FIRST, then indent every line by 8. Plain
+                           `indent` does not emit the leading newline, so the
+                           first injected line would weld itself onto the end
+                           of the line above. 8 = 4 for the YAML block scalar
+                           + 4 for nginx's own nesting inside `server { }`.
+
+      Note this comment is a Go template comment, so it disappears at render
+      time. A `#` comment here would be nginx syntax and would end up in the
+      actual config file shipped to the pod.
+    */}}
+
+        # Extra directives from .Values.nginx.extraServerConfig
+        {{- . | trimSuffix "\n" | nindent 8 }}
+    {{- end }}
+    }
+{{- if .Values.extraFiles }}
+---
+{{- /*
+A SECOND resource in the same file. Helm splits on the YAML document
+separator, so one .yaml file can hold several manifests. Grouping the two
+ConfigMaps here also means the checksum/config annotation in the Deployment
+(which hashes this whole file) covers both - edit either one and the pods
+roll.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "resume.fullname" . }}-files
+  labels:
+    {{- include "resume.componentLabels" (dict "ctx" . "component" "web") | nindent 4 }}
+data:
+  {{- range $name, $content := .Values.extraFiles }}
+  {{- /*
+    $name is quoted because filenames like "robots.txt" contain a dot, and an
+    unquoted key with a dot is fine in YAML but quoting removes all doubt.
+    The content is piped through toYaml so that multi-line strings, quotes and
+    special characters are emitted as valid YAML rather than breaking it.
+  */}}
+  {{ $name | quote }}: {{ $content | toYaml | indent 4 | trim }}
+  {{- end }}
+{{- end }}

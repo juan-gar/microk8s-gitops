@@ -1,0 +1,30 @@
+{{- /*
+The simplest file in the chart - useful as a baseline for what a template
+looks like with no conditionals at all.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "resume.fullname" . }}
+  labels:
+    {{- include "resume.componentLabels" (dict "ctx" . "component" "web") | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      {{- /*
+        targetPort names the CONTAINER's port by name rather than number. The
+        name is defined in deployment.yaml (ports: - name: http), so changing
+        containerPort in values.yaml moves both ends automatically and they
+        cannot drift apart.
+      */}}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- /*
+      Selector uses ONLY the stable selector labels - never the full label set.
+      Including version labels here would break routing on every appVersion
+      bump, because the Service would stop matching the running pods.
+    */}}
+    {{- include "resume.selectorLabels" . | nindent 4 }}

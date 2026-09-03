@@ -1,0 +1,56 @@
+{{- /*
+NOTES.txt is special-cased by Helm: it is templated like everything else, but
+instead of being applied to the cluster it is PRINTED after `helm install` and
+`helm upgrade`. Use it to tell the operator how to actually reach the thing.
+
+It is plain text, not YAML, so indentation is free here - which makes it a
+low-stakes place to practise template logic.
+
+(ArgoCD never shows this, since it only applies rendered manifests. It is for
+your local helm loop.)
+*/}}
+Resume site deployed.
+
+Chart:   {{ .Chart.Name }}-{{ .Chart.Version }}
+Image:   {{ include "resume.image" . }}
+Release: {{ .Release.Name }} (namespace {{ .Release.Namespace }})
+
+Reach it at:
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+{{- $scheme := "http" }}
+{{- if $.Values.ingress.tls }}{{ $scheme = "https" }}{{ end }}
+{{- /*
+  Capture .host BEFORE descending into .paths - inside that inner range, "."
+  is the path entry and .host no longer resolves. This is the same trap the
+  ingress.yaml comments describe, and it is easy to miss here because a bad
+  NOTES.txt renders as empty text rather than failing loudly.
+*/}}
+{{- $host := .host }}
+{{- range .paths }}
+  {{ $scheme }}://{{ $host }}{{ .path }}
+{{- end }}
+{{- end }}
+{{- else if eq .Values.service.type "LoadBalancer" }}
+  Waiting for the LoadBalancer IP. Watch it with:
+    kubectl get svc -n {{ .Release.Namespace }} -w {{ include "resume.fullname" . }}
+{{- else }}
+  No Ingress is enabled, so the Service is cluster-internal only.
+  Port-forward to check it from your laptop:
+
+    kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "resume.fullname" . }} 8080:{{ .Values.service.port }}
+
+  then open http://localhost:8080
+{{- end }}
+
+{{- if and .Values.autoscaling.enabled (not .Values.topologySpreadEnabled) }}
+
+Note: autoscaling is on but pods are not spread across nodes. On a 3-Pi
+cluster you probably want topologySpreadEnabled: true as well.
+{{- end }}
+{{- if eq .Values.image.pullPolicy "Always" }}
+
+Note: pullPolicy is Always. On a home network with a slow uplink this makes
+every pod restart wait on a registry round-trip; IfNotPresent with immutable
+digest tags is usually the better trade.
+{{- end }}

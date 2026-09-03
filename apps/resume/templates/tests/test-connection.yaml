@@ -1,0 +1,37 @@
+{{- /*
+A HELM TEST. This pod is not created on install - the helm.sh/hook annotation
+makes it run only on `helm test <release>`, which is a genuinely useful
+smoke-check after an upgrade:
+
+    helm test resume -n resume
+
+Hooks in general are how Helm runs things at points in a release's lifecycle:
+pre-install, post-install, pre-upgrade, post-delete, and test. Migration jobs
+are the classic real use.
+
+hook-delete-policy controls cleanup. Keeping the pod on failure is deliberate -
+you want its logs to explain what broke.
+
+Note ArgoCD does NOT run helm tests; it renders the chart with `helm template`
+and applies the output. ArgoCD honours its own argocd.argoproj.io/hook
+annotations instead. So this test is for your local loop, not the cluster's.
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "resume.fullname" . }}-test-connection
+  labels:
+    {{- include "resume.componentLabels" (dict "ctx" . "component" "test") | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: wget
+      image: busybox:1.36
+      command: ['wget']
+      args:
+        - '--spider'
+        - '--timeout=5'
+        - '{{ include "resume.fullname" . }}:{{ .Values.service.port }}'

@@ -1,0 +1,35 @@
+# The resume site. ArgoCD renders apps/resume with `helm template` and applies
+# the result - it does NOT run `helm install`, so there is no Helm release in
+# the cluster and `helm list` will show nothing. ArgoCD tracks the resources
+# itself instead. Practical consequences:
+#   - NOTES.txt and helm tests never run here (they are for your local loop).
+#   - `helm.sh/hook` annotations are ignored; ArgoCD has its own hook system.
+#   - Rollback is `argocd app rollback` / git revert, not `helm rollback`.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: resume
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/juan-gar/microk8s-gitops.git
+    targetRevision: main
+    path: apps/resume
+    helm:
+      # values.yaml in the chart directory is picked up automatically, so it
+      # does not need listing here. Add environment-specific overrides with
+      # `valueFiles:` (paths relative to the chart) or inline `values:` below.
+      #
+      # Inline values win over valueFiles, which win over the chart's own
+      # values.yaml - same precedence order as `helm -f a -f b --set`.
+      releaseName: resume
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: resume
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

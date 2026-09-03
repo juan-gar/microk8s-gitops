@@ -1,0 +1,14 @@
+# Patterns here are excluded when the chart is packaged with `helm package`.
+# Same syntax as .gitignore. Matters less for a chart ArgoCD reads straight
+# from git, but costs nothing and keeps `helm package` output clean.
+.DS_Store
+.git/
+.gitignore
+*.swp
+*.bak
+*.tmp
+*.orig
+*~
+.project
+.idea/
+.vscode/

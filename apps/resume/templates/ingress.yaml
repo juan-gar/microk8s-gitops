@@ -1,0 +1,54 @@
+{{- /*
+Nested loops, and the most useful advanced trick in the file: capturing
+variables before entering a `range`.
+*/}}
+{{- if .Values.ingress.enabled -}}
+{{- /*
+Capture what we need from the root context into variables FIRST. Inside the
+`range` blocks below, "." is rebound to the loop item, so `.Values` and
+helper includes that expect the root context are no longer reachable through
+it. $ always works too, but named variables read better and make the
+dependency explicit.
+*/}}
+{{- $fullName := include "resume.fullname" . -}}
+{{- $svcPort := .Values.service.port -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "resume.componentLabels" (dict "ctx" . "component" "web") | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- /*
+            Second level of nesting: "." is now the path entry, while the host
+            entry from the outer loop is no longer directly addressable. If you
+            needed it, you would capture it as a variable before this inner
+            range - same pattern as $fullName above.
+          */}}
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ $fullName }}
+                port:
+                  number: {{ $svcPort }}
+          {{- end }}
+    {{- end }}
+{{- end }}

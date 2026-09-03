@@ -1,0 +1,50 @@
+# Chart.yaml is the chart's identity card. Helm reads it before anything else,
+# and several fields become available inside templates as `.Chart.*`.
+---
+# apiVersion v2 = Helm 3. (v1 was Helm 2; you'll still see it in old charts.)
+# The practical difference: v2 moved dependencies out of requirements.yaml and
+# into the `dependencies:` block below.
+apiVersion: v2
+
+name: resume
+description: Static resume site served by nginx
+
+# "application" = deployable chart. The other option is "library", a chart that
+# ships only reusable templates in _helpers.tpl-style files and renders nothing
+# of its own. If you later factor your common labels/helpers out for reuse
+# across several homelab apps, that extraction becomes a library chart.
+type: application
+
+# TWO DIFFERENT VERSIONS - this trips up almost everyone at first:
+#
+#   version    = the version of THIS CHART (the packaging). Bump it whenever
+#                you change templates or values structure. Must be SemVer.
+#   appVersion = the version of the SOFTWARE being deployed. Free-form.
+#                Referenced in templates as `.Chart.AppVersion`, and used here
+#                as the default image tag (see _helpers.tpl "resume.image").
+#
+# So: retagging your resume image 1.1.0 -> bump appVersion. Rewriting the
+# Deployment template -> bump version. Both -> bump both.
+version: 0.1.0
+appVersion: "1.0.0"
+
+keywords:
+  - resume
+  - static-site
+
+maintainers:
+  - name: Juan García
+    url: https://github.com/juan-gar
+
+# `helm lint` nags without this. Any URL to an image works.
+icon: https://raw.githubusercontent.com/kubernetes/community/master/icons/png/resources/labeled/pod-128.png
+
+# No dependencies today. When you need one, it looks like this - and note that
+# `helm dependency update` then vendors the chart into charts/ and writes
+# Chart.lock, both of which you'd want committed for reproducible GitOps:
+#
+# dependencies:
+#   - name: redis
+#     version: "20.x.x"
+#     repository: https://charts.bitnami.com/bitnami
+#     condition: redis.enabled     # gates the whole subchart on a values flag

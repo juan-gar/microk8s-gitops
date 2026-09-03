@@ -1,0 +1,43 @@
+{{- /*
+Off by default - included as a worked example of optional resources and of
+`.Capabilities`, which lets a chart adapt to the cluster it is being rendered
+against.
+
+Caveat worth knowing for GitOps: `.Capabilities.APIVersions` is populated from
+a live cluster during `helm install`, but during a bare `helm template` (no
+cluster) it falls back to a built-in list. ArgoCD renders with `helm template`,
+so capability checks can behave differently there than they do locally. Prefer
+explicit values flags over capability sniffing when the answer matters.
+*/}}
+{{- if .Values.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "resume.fullname" . }}
+  labels:
+    {{- include "resume.componentLabels" (dict "ctx" . "component" "web") | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "resume.fullname" . }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    {{- if .Values.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+    {{- end }}
+    {{- if .Values.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
+{{- end }}

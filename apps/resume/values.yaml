@@ -1,0 +1,219 @@
+# values.yaml is the chart's public API. Everything a user of this chart is
+# allowed to change lives here; everything in templates/ is implementation.
+#
+# Two rules that keep charts pleasant to use:
+#   1. Every key that appears here should be referenced by some template.
+#      Dead values are worse than no values - they imply a knob that does
+#      nothing.
+#   2. Never reference a key in a template that is absent here. Helm renders
+#      missing keys as empty rather than erroring, so a typo silently produces
+#      a broken manifest. values.schema.json (next to this file) turns that
+#      class of mistake into a loud failure instead.
+
+# -- Number of nginx pods. Three Pis, so up to 3 is reasonable, but a static
+# site is not exactly under load. Ignored entirely when autoscaling.enabled.
+replicaCount: 1
+
+image:
+  # -- Container image repository. Built from site/ by
+  # .github/workflows/build-site.yml. MUST be an arm64 (or multi-arch) image -
+  # the Pis fail with "exec format error" on an amd64-only image, which is the
+  # single most common homelab-on-ARM footgun.
+  repository: ghcr.io/juan-gar/resume-web
+  # -- Image tag. Left empty on purpose: the template falls back to
+  # .Chart.AppVersion, so the deployed version is recorded in Chart.yaml and
+  # travels with the chart. Set this to override for a one-off.
+  tag: ""
+  # -- Pin by digest instead of tag. When set, this WINS over tag - a digest
+  # is immutable, which is what you actually want in GitOps. Once you have a
+  # build pipeline, have it write the digest here.
+  # e.g. sha256:abc123...
+  digest: ""
+  pullPolicy: IfNotPresent
+
+# -- Secrets for pulling from a private registry. List of {name: secret-name}.
+imagePullSecrets: []
+
+# -- Override the generated resource names. Rarely needed; here because every
+# upstream chart has them and you'll be expected to support them.
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # -- Create a dedicated ServiceAccount rather than using "default". Good
+  # hygiene: it gives you something to bind RBAC or a cloud identity to later.
+  create: true
+  # -- Name to use. Empty = derive from the release name.
+  name: ""
+  annotations: {}
+  # -- A static site has no business talking to the Kubernetes API, so don't
+  # mount a token into the pod.
+  automountServiceAccountToken: false
+
+service:
+  type: ClusterIP
+  # -- Port the Service listens on (what other things in the cluster dial).
+  port: 80
+
+# -- nginx's listen port inside the container. Kept separate from service.port
+# because they genuinely differ: this one is >1024 so nginx can run as a
+# non-root user (see podSecurityContext below). This value is templated into
+# the nginx.conf in the ConfigMap.
+containerPort: 8080
+
+ingress:
+  # -- Traefik is scaffolded in clusters/rpi-cluster/platform/traefik.yaml, so
+  # this can be on. If you deleted that and use the microk8s `ingress` addon
+  # instead, set className to "public".
+  enabled: true
+  className: traefik
+  annotations: {}
+  # -- Each host gets a list of paths. The template ranges over both, so this
+  # structure supports several hostnames pointing at the same Service.
+  #
+  # CHANGE THIS to whatever your router/DNS resolves to a Pi. `.lan` only
+  # works if your DNS serves it; a /etc/hosts entry pointing at any node's IP
+  # works too, since Traefik runs as a DaemonSet with hostPort 80.
+  hosts:
+    - host: resume.lan
+      paths:
+        - path: /
+          pathType: Prefix
+  # -- TLS blocks, passed through nearly verbatim. With cert-manager installed
+  # you'd add its annotation above and name a secret here.
+  tls: []
+  #  - secretName: resume-tls
+  #    hosts:
+  #      - resume.local
+
+resources:
+  # Requests are what the scheduler reserves; limits are what the kernel
+  # enforces. Deliberately no CPU limit: CPU limits cause throttling, and on a
+  # 4-core Pi that hurts far more than the noisy-neighbour problem it prevents.
+  # A memory limit IS set, because memory is not compressible - without one, a
+  # leak takes the whole node down.
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 64Mi
+
+autoscaling:
+  # -- Off by default. Left in as a worked example of a conditionally-rendered
+  # resource; a static site on three Pis does not need an HPA.
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: ""
+
+# -- Pod-level security settings. nginxinc/nginx-unprivileged or your own
+# rootless image is required for this to work; the stock nginx image wants
+# root to bind :80 and write to /var/cache/nginx.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 101
+  runAsGroup: 101
+  fsGroup: 101
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Container-level security settings.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# -- Liveness/readiness probes. Both point at "/" since a static site has no
+# dedicated health endpoint. Structure is passed straight through toYaml, so
+# any probe field Kubernetes accepts works here.
+probes:
+  liveness:
+    enabled: true
+    initialDelaySeconds: 5
+    periodSeconds: 20
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readiness:
+    enabled: true
+    initialDelaySeconds: 2
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# -- Same-origin proxy that lets the page's JS query Prometheus without CORS
+# and without exposing Prometheus to the network. See the extensive comments
+# in templates/configmap.yaml - the nginx side has a real startup-DNS trap.
+prometheus:
+  proxy:
+    # -- Turn off if you have no Prometheus; the page then falls back to the
+    # cached values hardcoded in index.html and labels itself "unreachable".
+    enabled: true
+
+    # -- Prometheus service DNS. This is the Service created by
+    # clusters/rpi-cluster/platform/prometheus.yaml, whose name is derived from
+    # that Application's `releaseName: prometheus` plus the chart's own
+    # prefix. If you rename that release, this MUST change to match.
+    #
+    # Verify it against the cluster with:
+    #   microk8s kubectl get svc -n monitoring
+    url: http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090
+
+    # -- DNS server nginx uses to resolve the above AT REQUEST TIME. Must be an
+    # IP: nginx's `resolver` cannot bootstrap itself from a name. This is the
+    # microk8s CoreDNS default; confirm with
+    #   microk8s kubectl get svc -n kube-system kube-dns
+    resolver: 10.152.183.10
+
+    # -- Requests/second per client IP, and how many may burst above it.
+    # The page makes 3 requests per refresh, so this is generous.
+    rateLimit: 10
+    rateLimitBurst: 20
+
+    # -- Fail fast rather than hanging the panel when Prometheus is down. The
+    # page already degrades gracefully to cached values on error.
+    connectTimeout: 2s
+    readTimeout: 10s
+
+nginx:
+  # -- Extra directives injected into the nginx server block. Multi-line
+  # string, indented into the ConfigMap by the template.
+  extraServerConfig: ""
+  # -- Cache-Control max-age for static assets, in seconds. Templated into
+  # nginx.conf to show that config files are just more template output.
+  assetCacheSeconds: 3600
+
+# -- Extra environment variables, as a list of name/value. A list (not a map)
+# because that is the shape Kubernetes itself uses, so it can be passed
+# through with toYaml and supports valueFrom for secrets.
+env: []
+#  - name: SITE_ENV
+#    value: production
+#  - name: ANALYTICS_TOKEN
+#    valueFrom:
+#      secretKeyRef:
+#        name: resume-secrets
+#        key: analytics-token
+
+# -- Arbitrary extra files to mount alongside the site, as filename -> content.
+# A map here (unlike env) because filenames are naturally keys. The template
+# ranges over it; see configmap.yaml.
+extraFiles: {}
+#  robots.txt: |
+#    User-agent: *
+#    Allow: /
+
+# -- Scheduling controls. All three are rendered only when non-empty, via
+# `with`, so an empty value produces no stray YAML key at all.
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# -- Spread pods across the three Pis rather than stacking them on one node.
+# Only takes effect when replicaCount > 1.
+topologySpreadEnabled: true
+
+podAnnotations: {}
+podLabels: {}
