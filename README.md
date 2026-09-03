@@ -12,10 +12,11 @@ cluster.
 
 ```
 bootstrap/                       one-time, manually-applied root Application
-clusters/rpi-cluster/platform/   cluster infrastructure (ArgoCD itself, and later ingress/monitoring)
+clusters/rpi-cluster/platform/   cluster infrastructure (ArgoCD, Traefik, Prometheus)
 clusters/rpi-cluster/apps/       workload Applications
 apps/                            the Helm chart backing each workload
-site/                            source for the resume site image
+site/                            source for the resume site image (built by CI)
+.github/workflows/               multi-arch image build + digest write-back
 ```
 
 ## Bootstrapping a fresh cluster
@@ -79,29 +80,29 @@ The site reads live cluster state from Prometheus through a same-origin nginx
 proxy — see [`docs/architecture.md`](docs/architecture.md) for the request
 path.
 
-### Before the resume app will serve
+### Remaining steps before it serves
 
-The chart points at `ghcr.io/juan-gar/resume-web`. The site source lives in
-[`site/`](site/README.md), but nothing builds and pushes that image yet, so
-the Application will sync while the pod fails to pull. Build and push it by
-hand for now:
+1. **Push the image once.** The chart points at `ghcr.io/juan-gar/resume-web`,
+   which doesn't exist until `.github/workflows/build-site.yml` runs. Push a
+   change under `site/`, or trigger the workflow manually. It builds
+   linux/arm64 (plus amd64) and writes the resulting digest back into
+   `apps/resume/values.yaml`, which is what triggers the ArgoCD rollout.
+   - Make the GHCR package public, or add a pull secret and set
+     `imagePullSecrets` in values — GHCR packages default to private.
+2. **Point DNS at a Pi.** `ingress.hosts[0].host` is `resume.lan`. Traefik runs
+   on every node with hostPort 80, so any node's IP works; an `/etc/hosts`
+   entry is enough to test.
+3. **Check the proxy target** matches your cluster:
+   ```sh
+   microk8s kubectl get svc -n monitoring            # prometheus.proxy.url
+   microk8s kubectl get svc -n kube-system kube-dns  # prometheus.proxy.resolver
+   ```
 
-```sh
-docker buildx build --platform linux/arm64 -t ghcr.io/juan-gar/resume-web:latest --push site
-```
-
-It must be arm64 — an amd64-only image fails on the Pis with
-`exec format error`.
-
-`ingress.hosts[0].host` is `resume.lan`. Traefik runs on every node with
-hostPort 80, so any node's IP works; an `/etc/hosts` entry is enough to test.
-
-Check the proxy target matches your cluster:
-
-```sh
-microk8s kubectl get svc -n monitoring            # prometheus.proxy.url
-microk8s kubectl get svc -n kube-system kube-dns  # prometheus.proxy.resolver
-```
+Sync order mostly doesn't matter — the resume pod starts fine without
+Prometheus and its panels fall back to cached values. The one failure mode that
+*would* break it (nginx refusing to start when its proxy upstream doesn't
+resolve) is deliberately avoided; see the comments in
+`apps/resume/templates/configmap.yaml`.
 
 Not yet scaffolded: persistent storage beyond Prometheus's hostpath PVC,
 cert-manager/TLS, MetalLB, and secrets management (SOPS/sealed-secrets). Add
