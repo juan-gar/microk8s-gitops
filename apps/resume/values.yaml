@@ -62,11 +62,11 @@ service:
 containerPort: 8080
 
 ingress:
-  # -- Traefik is scaffolded in clusters/rpi-cluster/platform/traefik.yaml, so
-  # this can be on. If you deleted that and use the microk8s `ingress` addon
-  # instead, set className to "public".
+  # -- Uses the cluster's existing ingress-nginx (the microk8s `ingress`
+  # addon), whose default class is "public". Confirm with:
+  #   microk8s kubectl get ingressclass
   enabled: true
-  className: traefik
+  className: public
   annotations: {}
   # -- Each host gets a list of paths. The template ranges over both, so this
   # structure supports several hostnames pointing at the same Service.
@@ -152,14 +152,13 @@ prometheus:
     # cached values hardcoded in index.html and labels itself "unreachable".
     enabled: true
 
-    # -- Prometheus service DNS. This is the Service created by
-    # clusters/rpi-cluster/platform/prometheus.yaml, whose name is derived from
-    # that Application's `releaseName: prometheus` plus the chart's own
-    # prefix. If you rename that release, this MUST change to match.
+    # -- Prometheus service DNS. This points at the cluster's PRE-EXISTING
+    # Prometheus in the monitoring namespace - a hand-rolled Deployment driven
+    # by the `prometheus-config` ConfigMap, not managed by this repo.
     #
     # Verify it against the cluster with:
     #   microk8s kubectl get svc -n monitoring
-    url: http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090
+    url: http://prometheus.monitoring.svc.cluster.local:9090
 
     # -- DNS server nginx uses to resolve the above AT REQUEST TIME. Must be an
     # IP: nginx's `resolver` cannot bootstrap itself from a name. This is the

@@ -51,52 +51,71 @@ instead of fighting a differently-configured install.
 | Component | Source | Notes |
 | --- | --- | --- |
 | ArgoCD | `platform/argocd.yaml` | manages itself |
-| Traefik | `platform/traefik.yaml` | DaemonSet, hostPort 80/443 |
-| kube-prometheus-stack | `platform/prometheus.yaml` | Prometheus + node-exporter + kube-state-metrics; Grafana and Alertmanager off |
 | resume site | `apps/resume.yaml` → `apps/resume/` | image built from `site/`; queries Prometheus through a same-origin proxy |
 
-### Traefik
+## What this repo deliberately does NOT manage
 
-Runs as a DaemonSet with `hostPort` 80/443 rather than a LoadBalancer Service,
-because there is no LoadBalancer implementation on bare metal until MetalLB is
-scaffolded. One Traefik per node means any Pi's IP serves the cluster's
-Ingresses, so DNS can point at any of them.
+The cluster predates this repo and already runs several things. This repo
+consumes them rather than duplicating them:
 
-microk8s also ships an nginx-based `ingress` addon. Running both is a
-conflict: two controllers claiming the same Ingress objects and both wanting
-:80/:443 on the host. This repo standardises on Traefik.
+| Already in the cluster | Namespace | Why we don't manage it |
+| --- | --- | --- |
+| Prometheus + Grafana + node-exporter | `monitoring` | hand-rolled Deployment driven by the `prometheus-config` ConfigMap; adopting it into GitOps would be a separate, deliberate migration |
+| ingress-nginx (classes `public`, `nginx`) | microk8s addon | the `ingress` addon already owns :80/:443 |
+| MetalLB | `metallb-system` | LoadBalancer Services already work |
+| in-cluster registry | `container-registry` | we push to ghcr.io instead, so images survive a cluster rebuild |
 
-### Prometheus
+Adding a second ingress controller or a second Prometheus was tried and
+reverted — see the "two default IngressClasses" trap below.
 
-kube-prometheus-stack rather than the bare prometheus chart, because the
-bundle also brings node-exporter (node CPU/memory series) and
-kube-state-metrics (`kube_*` series). Grafana and Alertmanager are disabled to
-save memory, and the control-plane scrape targets microk8s does not expose
-(scheduler, controller-manager, proxy, etcd) are turned off so the targets
-page stays honest.
+### If you add an ingress controller later
 
-One relabeling worth knowing about: the node-exporter ServiceMonitor rewrites
-the `instance` label to the node name. Without it, anything querying these
-series sees pod IPs instead of `pi-01`.
+Only one IngressClass may carry
+`ingressclass.kubernetes.io/is-default-class: "true"`. Installing a second
+controller that also marks itself default leaves two defaults, and any
+Ingress without an explicit `spec.ingressClassName` becomes ambiguous. Always
+set the class explicitly, as `apps/resume/values.yaml` does.
 
 ## How the resume site gets its cluster data
 
 ```
-browser ──> Traefik ──> resume pod (nginx)
-                          │  location = /api/v1/query
-                          └──> prometheus-kube-prometheus-prometheus.monitoring:9090
+browser ──> ingress-nginx ──> resume pod (nginx)
+                                │  location = /api/v1/query
+                                └──> prometheus.monitoring:9090   (pre-existing)
 ```
 
 The page's JavaScript calls `/api/v1/query` on its own origin; nginx proxies
 that single endpoint to Prometheus inside the cluster. Prometheus is never
 exposed through an Ingress, and there is no CORS to configure.
 
-Two coupling points to remember, because nothing enforces them:
+`prometheus.proxy.url` in `apps/resume/values.yaml` must match that Service.
+Nothing enforces the link — if the monitoring stack is ever renamed or
+migrated, the panels silently fall back to cached values.
 
-1. `prometheus.proxy.url` in `apps/resume/values.yaml` must match the Service
-   name produced by `releaseName:` in `platform/prometheus.yaml`.
-2. The node-exporter `instance` relabeling in `platform/prometheus-values.yaml`
-   is what makes the site show node names instead of pod IPs.
+### What the panels can and cannot show today
+
+The existing Prometheus scrapes node-exporter, the kubelet/cAdvisor and the
+API server, but **not kube-state-metrics — which is not deployed anywhere in
+the cluster**. So:
+
+| Panel | Query | Works today? |
+| --- | --- | --- |
+| CPU / memory per node | `node_*` | yes |
+| Pod count | `kube_pod_info` | no — no KSM |
+| Deployments table | `kube_deployment_*` | no — no KSM |
+| Node roles | `kube_node_role` | no — no KSM |
+
+The site degrades to its hardcoded fallback for anything missing, so nothing
+breaks; those panels just show cached values.
+
+Node names also read as IPs (`192.168.0.42`) rather than `master`/`worker1`,
+because the existing `node-exporter` scrape job does not relabel `instance` to
+the node name.
+
+Making all of that live needs two changes to the **existing, unmanaged**
+monitoring stack: deploy kube-state-metrics, and add a scrape job plus an
+`instance` relabeling to the `prometheus-config` ConfigMap. Both are out of
+scope here precisely because that stack is not managed by this repo.
 
 ## Adding a new app
 
@@ -117,10 +136,10 @@ See [`helm-workflow.md`](helm-workflow.md) for the local edit/verify loop.
 
 Add a new `Application` under `clusters/rpi-cluster/platform/`. For
 third-party components prefer an Application sourced directly from the
-upstream Helm chart repo, like `traefik.yaml` does, over vendoring the chart
+upstream Helm chart repo, like `argocd.yaml` does, over vendoring the chart
 into this repo.
 
-Two options that matter for real charts, both used by `prometheus.yaml`:
+Two sync options worth knowing when you add a chart that ships CRDs:
 
 - `ServerSideApply=true` — required for any chart with large CRDs. Client-side
   apply writes the whole manifest into an annotation, and the Prometheus

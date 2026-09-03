@@ -9,7 +9,7 @@ This directory is the **image source**. How it gets deployed lives elsewhere:
 | Container image build | `Dockerfile` here, built by `.github/workflows/build-site.yml` |
 | Deployment / Service / Ingress | `apps/resume` (Helm chart) |
 | nginx config actually used in-cluster | `apps/resume/templates/configmap.yaml` |
-| Prometheus itself | `clusters/rpi-cluster/platform/prometheus.yaml` |
+| Prometheus | pre-existing `monitoring` namespace (not managed by this repo) |
 
 `k8s.yaml` here is superseded and applies to nothing — see the header in it.
 
@@ -45,12 +45,11 @@ Change the upstream in `apps/resume/values.yaml`:
 ```yaml
 prometheus:
   proxy:
-    url: http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090
+    url: http://prometheus.monitoring.svc.cluster.local:9090
 ```
 
-That name is derived from `releaseName: prometheus` in
-`clusters/rpi-cluster/platform/prometheus.yaml` plus the chart's own prefix.
-Rename the release and this must change too. Confirm against the cluster with
+That is the cluster's pre-existing Prometheus, which this repo does not
+manage. Confirm against the cluster with
 `microk8s kubectl get svc -n monitoring`.
 
 ### Exact PromQL
@@ -68,19 +67,27 @@ you can paste any of it straight into Prometheus's expression browser.
 | Deployment desired | `kube_deployment_spec_replicas` |
 | Restarts per deployment | `sum by (namespace, deployment) (label_replace(kube_pod_container_status_restarts_total * on (namespace, pod) group_left(owner_name) kube_pod_owner{owner_kind="ReplicaSet"}, "deployment", "$1", "owner_name", "(.+)-[^-]+"))` |
 
-`node_*` needs **node-exporter**; `kube_*` needs **kube-state-metrics**. Both
-ship with kube-prometheus-stack and are enabled in
-`clusters/rpi-cluster/platform/prometheus-values.yaml`.
+`node_*` needs **node-exporter**; `kube_*` needs **kube-state-metrics**.
+
+⚠️ In this cluster node-exporter is running but **kube-state-metrics is not
+deployed at all**, so every `kube_*` row above returns nothing today. The page
+falls back to its hardcoded values for the pod count, deployments table and
+node roles; the CPU and memory panels work.
+
+To make them live, the existing (unmanaged) monitoring stack needs
+kube-state-metrics deployed and a matching scrape job added to its
+`prometheus-config` ConfigMap.
 
 Two notes on the last two rows:
 
 - The restarts query walks pod → owning ReplicaSet → Deployment, stripping the
   ReplicaSet's pod-template hash with `label_replace`. It is best-effort: pods
   not owned by a ReplicaSet aren't counted.
-- Node names only read as `pi-01` because the node-exporter ServiceMonitor
-  rewrites `instance` to the node name (see `prometheus-values.yaml`).
-  Without that relabeling you'd see pod IPs. The page splits `instance` on
-  `:` so it degrades to an IP rather than breaking.
+- Node names currently read as IPs (`192.168.0.42`), because the existing
+  `node-exporter` scrape job does not relabel `instance` to the node name.
+  The page splits `instance` on `:` so it degrades to an IP rather than
+  breaking. Adding an `instance` relabeling to `prometheus-config` would show
+  `master`/`worker1`/`worker2` instead.
 
 ### What's exposed
 
