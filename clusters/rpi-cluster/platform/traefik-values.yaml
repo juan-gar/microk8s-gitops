@@ -11,7 +11,14 @@ deployment:
 #
 # Alternative once MetalLB exists: service.type LoadBalancer and drop hostPort.
 service:
-  type: ClusterIP
+  # NOTE the nesting: in this chart the Service type lives at
+  # `service.spec.type`, NOT `service.type`. A top-level `service.type` is
+  # silently ignored - the chart's values.schema.json accepts it and the
+  # default (LoadBalancer) applies anyway. That mistake put this Service on a
+  # MetalLB address already held by another ingress gateway, with conflicting
+  # :80/:443. `helm template ... | grep 'type:'` is the check that catches it.
+  spec:
+    type: ClusterIP
 
 ports:
   web:
