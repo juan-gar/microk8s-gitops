@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Juan García Miñano — Senior DevOps Engineer</title>
+<meta name="description" content="Senior DevOps Engineer in Barcelona. GitOps platforms on GKE with ArgoCD, Terraform and Helm. Self-hosted on a Raspberry Pi k3s cluster.">
+<link rel="stylesheet" href="styles.css">
+<style>
+  body { margin: 0; }
+  a { color: var(--color-accent); text-decoration: none; }
+  a:hover { color: var(--color-accent-700); text-decoration: underline; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+
+  .page { min-height: 100vh; background: var(--color-bg); color: var(--color-text);
+    font-family: var(--font-body); padding: 0 var(--space-6) 96px; }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+
+  header.top { display: flex; align-items: center; gap: var(--space-6);
+    padding: var(--space-6) 0; border-bottom: 1px solid var(--color-divider); }
+  header.top nav { display: flex; align-items: center; gap: var(--space-6); margin-left: auto;
+    font-size: 13px; letter-spacing: .08em; text-transform: uppercase; }
+  #theme-toggle { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+
+  .hero { display: grid; grid-template-columns: 1.35fr 1fr; gap: var(--space-8);
+    padding: 96px 0 80px; align-items: end; }
+  .kicker { font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--color-accent-700); margin-bottom: var(--space-4); }
+  .hero h1 { font-size: 76px; line-height: .98; margin: 0 0 var(--space-6); letter-spacing: -.02em; }
+  .lede { font-size: 19px; line-height: 1.5; max-width: 46ch; margin: 0;
+    color: color-mix(in srgb, var(--color-text) 78%, transparent); }
+  .facts { display: grid; gap: var(--space-4); font-size: 14px; }
+  .facts > div { display: flex; justify-content: space-between; gap: var(--space-4);
+    padding-bottom: var(--space-2); border-bottom: 1px solid var(--color-divider); }
+  .facts > div:last-child { border-bottom: 0; padding-bottom: 0; }
+  .facts dt, .fact-key { font-size: 12px; letter-spacing: .1em; text-transform: uppercase;
+    color: color-mix(in srgb, var(--color-text) 55%, transparent); }
+  .live-dot { width: 7px; height: 7px; background: var(--color-accent); display: block;
+    animation: pulse 2.4s ease-in-out infinite; }
+
+  section { padding-bottom: 80px; }
+  .sec-head { display: flex; align-items: baseline; justify-content: space-between;
+    gap: var(--space-6); margin-bottom: var(--space-8); }
+  .sec-head h2, section > h2 { margin: 0 0 0; font-size: 34px; }
+  section > h2 { margin-bottom: var(--space-8); }
+  .meta { font-size: 12px; letter-spacing: .1em; text-transform: uppercase;
+    color: color-mix(in srgb, var(--color-text) 55%, transparent); white-space: nowrap; }
+
+  .panel { padding: var(--space-8); display: grid; gap: var(--space-8); }
+  .panel h3 { margin: 0; font-size: 20px; letter-spacing: .06em; text-transform: uppercase; }
+  .panel-head { display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: var(--space-6); }
+  .nodes { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-6); }
+  .node { border: 1px solid var(--color-divider); padding: var(--space-6);
+    display: grid; gap: var(--space-4); transition: background .18s; }
+  .node:hover { background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
+  .node-name { font-family: var(--font-heading); font-weight: 600; font-size: 17px; letter-spacing: .04em; }
+  .node-top { display: flex; align-items: center; justify-content: space-between; }
+  .node-top i { width: 6px; height: 6px; display: block; background: var(--color-accent); }
+  .bar-label { display: flex; justify-content: space-between; font-size: 12px;
+    letter-spacing: .08em; text-transform: uppercase;
+    color: color-mix(in srgb, var(--color-text) 55%, transparent); }
+  .bar { height: 6px; background: color-mix(in srgb, var(--color-text) 10%, transparent); margin-top: 5px; }
+  .bar > span { display: block; height: 100%; background: var(--color-accent); width: 0; transition: width .4s; }
+  .bar.mem > span { background: var(--color-accent-700); }
+  .node-detail { font-size: 12px; line-height: 1.5; min-height: 34px;
+    color: color-mix(in srgb, var(--color-text) 55%, transparent); }
+  .node .node-detail .extra { display: none; }
+  .node:hover .node-detail .extra { display: inline; }
+
+  table.table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.table th { text-align: left; font-size: 12px; letter-spacing: .1em; text-transform: uppercase;
+    padding: var(--space-2) 0; border-bottom: 1px solid var(--color-divider); }
+  table.table td { padding: var(--space-3) 0; border-bottom: 1px solid var(--color-divider); }
+  table.table td.num, table.table th.num { text-align: right; }
+  table.table td.dim { color: color-mix(in srgb, var(--color-text) 55%, transparent); }
+
+  .skills { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-8); }
+  .skill-group { display: grid; gap: var(--space-4); align-content: start; }
+  .skill-title { font-size: 12px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--color-accent-700); padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--color-divider); }
+  .chips { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+  .chips .tag { font-size: 13px; }
+
+  .role { display: grid; grid-template-columns: 120px 1fr; gap: var(--space-8);
+    padding: var(--space-6) 0; border-top: 1px solid var(--color-divider); }
+  .role:last-of-type { border-bottom: 1px solid var(--color-divider); }
+  .role-years { font-size: 13px; letter-spacing: .06em; padding-top: 3px;
+    color: color-mix(in srgb, var(--color-text) 55%, transparent); }
+  .role-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-3);
+    margin-bottom: var(--space-2); }
+  .role-title { font-family: var(--font-heading); font-weight: 600; font-size: 22px; }
+  .role-co { font-size: 14px; color: color-mix(in srgb, var(--color-text) 55%, transparent); }
+  .role p { margin: 0; max-width: 72ch; color: color-mix(in srgb, var(--color-text) 78%, transparent); }
+
+  .contact { padding: var(--space-8); display: flex; flex-wrap: wrap; align-items: center;
+    justify-content: space-between; gap: var(--space-8); }
+  .contact h2 { margin: 0 0 var(--space-2); font-size: 30px; }
+  .contact .btn { font-size: 14px; letter-spacing: .06em; text-transform: uppercase; }
+  .actions { display: flex; gap: var(--space-4); }
+
+  footer.bottom { display: flex; justify-content: space-between; gap: var(--space-6);
+    font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+    padding-top: var(--space-6); border-top: 1px solid var(--color-divider);
+    color: color-mix(in srgb, var(--color-text) 55%, transparent); }
+
+  html[data-theme="dark"] {
+    --color-bg: #141618;
+    --color-surface: #1d2023;
+    --color-text: #e8e9ea;
+    --color-divider: color-mix(in srgb, #e8e9ea 20%, transparent);
+    --color-accent: #94bce3;
+    --color-accent-700: #b5d9fd;
+    color-scheme: dark;
+  }
+
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; padding: 56px 0 48px; }
+    .hero h1 { font-size: 52px; }
+    .nodes { grid-template-columns: repeat(2, 1fr); }
+    .skills { grid-template-columns: 1fr; }
+    .role { grid-template-columns: 1fr; gap: var(--space-2); }
+    header.top nav { gap: var(--space-4); font-size: 12px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="wrap">
+
+    <header class="top">
+      <nav>
+        <a href="#cluster">Cluster</a>
+        <a href="#skills">Skills</a>
+        <a href="#experience">Experience</a>
+        <a href="#contact">Contact</a>
+        <button class="btn btn-secondary" id="theme-toggle" type="button">Dark</button>
+      </nav>
+    </header>
+
+    <section class="hero">
+      <div>
+        <div class="kicker">Senior DevOps Engineer</div>
+        <h1>Juan García<br>Miñano</h1>
+        <p class="lede">I move production infrastructure to the cloud and keep it boring — Terraform, GKE, GitOps, and pipelines that fail loudly before users notice.</p>
+      </div>
+      <div class="facts">
+        <div><span class="fact-key">Location</span><span>Barcelona, ES</span></div>
+        <div><span class="fact-key">Local time</span><span id="local-time">—</span></div>
+        <div><span class="fact-key">Served from</span><span>Raspberry Pi cluster</span></div>
+        <div><span class="fact-key">Status</span><span style="display:flex;align-items:center;gap:8px"><i class="live-dot"></i><span id="status-line">connecting…</span></span></div>
+      </div>
+    </section>
+
+    <section id="cluster">
+      <div class="sec-head">
+        <h2>The cluster this page runs on</h2>
+        <div class="meta">source: prometheus · <span id="source-label">connecting</span></div>
+      </div>
+
+      <div class="blueprint panel">
+        <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+
+        <div>
+          <div class="panel-head">
+            <h3>Nodes</h3>
+            <span class="meta">cpu / memory · <span id="updated-label">awaiting scrape</span></span>
+          </div>
+          <div class="nodes" id="nodes"></div>
+        </div>
+
+        <div>
+          <div class="panel-head">
+            <h3>Workloads</h3>
+            <span class="meta" id="pods-label">—</span>
+          </div>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Deployment</th>
+                <th>Namespace</th>
+                <th class="num">Ready</th>
+                <th class="num">Restarts</th>
+              </tr>
+            </thead>
+            <tbody id="deployments"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="skills">
+      <h2>Skills &amp; tooling</h2>
+      <div class="skills" id="skills-grid"></div>
+    </section>
+
+    <section id="experience">
+      <h2>Experience</h2>
+      <div id="roles"></div>
+    </section>
+
+    <section id="contact">
+      <div class="blueprint contact">
+        <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+        <div>
+          <h2>Open to DevOps &amp; platform roles</h2>
+          <p class="meta" style="white-space:normal;letter-spacing:0;text-transform:none;font-size:15px">Barcelona or remote · English C2 · French C2 · Spanish native</p>
+        </div>
+        <div class="actions">
+          <a class="btn btn-primary" href="mailto:garciaminanojuan@gmail.com">Email</a>
+          <a class="btn btn-secondary" href="https://www.linkedin.com/in/juan-garc%C3%ADa-mi%C3%B1ano-8b521b37/" target="_blank" rel="noopener">LinkedIn</a>
+        </div>
+      </div>
+    </section>
+
+    <footer class="bottom">
+      <span>garciaminanojuan@gmail.com</span>
+      <span>self-hosted · k3s on raspberry pi</span>
+    </footer>
+
+  </div>
+</div>
+
+<script>
+/* ── config ─────────────────────────────────────────────────────────────── */
+const CONFIG = {
+  // Same-origin Prometheus proxy. Point this at your Prometheus if you expose
+  // it directly (then it needs CORS): e.g. "http://prom.lan:9090/api/v1"
+  promBase: "/api/v1",
+  refreshSeconds: 20,
+  // Cap the deployments table so a busy cluster doesn't render 80 rows.
+  maxDeployments: 8
+};
+
+/* ── static content ─────────────────────────────────────────────────────── */
+const SKILLS = [
+  { title: "Cloud & orchestration", items: ["GCP", "GKE / Kubernetes", "k3s", "Compute Engine", "Cloud Run", "Cloud SQL", "Pub/Sub", "BigQuery", "VPC & networking", "IAM"] },
+  { title: "Automation & delivery", items: ["Terraform", "ArgoCD / GitOps", "Helm", "Kustomize", "GitHub Actions", "Docker", "CI/CD pipelines", "Secrets management"] },
+  { title: "Code & certs", items: ["Python", "JavaScript", "Node.js", "Associate Cloud Engineer", "Professional Cloud Architect"] }
+];
+
+const ROLES = [
+  { years: "2025 —", title: "Senior DevOps Engineer", company: "Xebia", line: "Building and operating GitOps platforms on GKE with ArgoCD, Terraform and Helm/Kustomize — golden-path templates, secrets management, and self-service delivery for engineering teams." },
+  { years: "2022 — 2025", title: "Cloud / DevOps Engineer", company: "GFT, Barcelona", line: "Led a major financial institution's on-prem to GCP migration with Terraform and GitHub Actions — hybrid architectures, automated provisioning, and enforced cloud security standards." },
+  { years: "2015 — 2022", title: "Google Cloud & Maps Technical Representative", company: "Webhelp, Barcelona", line: "Resolved Cloud and Maps Platform implementation issues for customers from startups to Spotify, Snapchat and Uber — where the move toward sysadmin, Docker and server-side work started." },
+  { years: "2014", title: "Marketing & Sales Assistant", company: "Distriread B.V., Eindhoven", line: "Ran product databases, multi-language catalogue content and order logistics across e-commerce suites, plus Spain/France customer support." }
+];
+
+/* Fallback shown until Prometheus answers — edit to match your cluster.
+   Both arrays are replaced wholesale once a scrape succeeds. */
+let nodes = [
+  { name: "pi-01", role: "control-plane", cpu: 0.31, mem: 0.54 },
+  { name: "pi-02", role: "worker", cpu: 0.62, mem: 0.71 },
+  { name: "pi-03", role: "worker", cpu: 0.18, mem: 0.44 }
+];
+let deployments = [
+  { name: "resume", ns: "resume", ready: "1/1", restarts: 0 },
+  { name: "traefik", ns: "traefik", ready: "3/3", restarts: 0 },
+  { name: "prometheus-kube-state-metrics", ns: "monitoring", ready: "1/1", restarts: 0 },
+  { name: "argocd-server", ns: "argocd", ready: "1/1", restarts: 0 },
+  { name: "argocd-repo-server", ns: "argocd", ready: "1/1", restarts: 0 }
+];
+let pods = 14, live = false;
+
+/* ── rendering ──────────────────────────────────────────────────────────── */
+const $ = (id) => document.getElementById(id);
+const pct = (v) => Math.max(0, Math.min(100, Math.round((v || 0) * 100)));
+const two = (n) => String(n).padStart(2, "0");
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function renderNodes() {
+  $("nodes").innerHTML = nodes.map((n) => `
+    <div class="node">
+      <div class="node-top"><span class="node-name">${esc(n.name)}</span><i></i></div>
+      <div>
+        <div class="bar-label"><span>cpu</span><span>${pct(n.cpu)}%</span></div>
+        <div class="bar"><span style="width:${pct(n.cpu)}%"></span></div>
+      </div>
+      <div>
+        <div class="bar-label"><span>mem</span><span>${pct(n.mem)}%</span></div>
+        <div class="bar mem"><span style="width:${pct(n.mem)}%"></span></div>
+      </div>
+      <div class="node-detail">${esc(n.role)}<span class="extra"> · load ${(n.cpu * 4).toFixed(2)}${n.temp ? " · " + n.temp + "°C" : ""}</span></div>
+    </div>`).join("");
+}
+
+function renderDeployments() {
+  $("deployments").innerHTML = deployments.map((d) => `
+    <tr>
+      <td>${esc(d.name)}</td>
+      <td class="dim">${esc(d.ns)}</td>
+      <td class="num">${esc(d.ready)}</td>
+      <td class="num dim">${esc(d.restarts)}</td>
+    </tr>`).join("");
+  $("pods-label").textContent = pods + " pods running";
+}
+
+function renderStatic() {
+  $("skills-grid").innerHTML = SKILLS.map((g) => `
+    <div class="skill-group">
+      <div class="skill-title">${esc(g.title)}</div>
+      <div class="chips">${g.items.map((i) => `<span class="tag tag-outline">${esc(i)}</span>`).join("")}</div>
+    </div>`).join("");
+  $("roles").innerHTML = ROLES.map((r) => `
+    <div class="role">
+      <div class="role-years">${esc(r.years)}</div>
+      <div>
+        <div class="role-head"><span class="role-title">${esc(r.title)}</span><span class="role-co">${esc(r.company)}</span></div>
+        <p>${esc(r.line)}</p>
+      </div>
+    </div>`).join("");
+}
+
+function renderStatus() {
+  $("status-line").textContent = nodes.length + (live ? " nodes up" : " nodes (cached)");
+  $("source-label").textContent = live ? "live" : "unreachable — last known values";
+}
+
+function clock() {
+  const d = new Date();
+  $("local-time").textContent = two(d.getHours()) + ":" + two(d.getMinutes()) + " CET";
+}
+
+/* ── prometheus ─────────────────────────────────────────────────────────── */
+/* All PromQL lives here so it can be read (and tested in Prometheus's own
+   expression browser) without hunting through the polling logic.
+
+   node_* series come from node-exporter; kube_* from kube-state-metrics.
+   Both ship with kube-prometheus-stack — see
+   clusters/rpi-cluster/platform/prometheus-values.yaml. */
+const QUERIES = {
+  cpu:   '100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[2m])) * 100)',
+  mem:   '(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100',
+  pods:  'count(kube_pod_info)',
+  /* Labels each node with control-plane/worker instead of assuming the first
+     one sorted is the control plane. Joins to the panels by node name, which
+     works because the ServiceMonitor rewrites node-exporter's `instance`
+     label to the node name (see prometheus-values.yaml). */
+  roles: 'kube_node_role',
+  deployReady: 'kube_deployment_status_replicas_ready',
+  deploySpec:  'kube_deployment_spec_replicas',
+  /* Restarts per Deployment. kube-state-metrics counts restarts per POD, so
+     this walks pod -> owning ReplicaSet -> Deployment: group_left pulls in
+     owner_name, then label_replace strips the ReplicaSet's trailing pod-
+     template hash ("resume-7d9f4b8c5" -> "resume"). Best-effort: a pod owned
+     directly by something else is not counted. */
+  deployRestarts:
+    'sum by (namespace, deployment) (' +
+      'label_replace(' +
+        'kube_pod_container_status_restarts_total' +
+        ' * on (namespace, pod) group_left(owner_name) ' +
+        'kube_pod_owner{owner_kind="ReplicaSet"},' +
+        ' "deployment", "$1", "owner_name", "(.+)-[^-]+"' +
+      ')' +
+    ')'
+};
+
+async function query(expr) {
+  const res = await fetch(CONFIG.promBase.replace(/\/$/, "") + "/query?query=" + encodeURIComponent(expr));
+  if (!res.ok) throw new Error("prometheus " + res.status);
+  const json = await res.json();
+  return (json.data && json.data.result) || [];
+}
+
+const num = (r) => parseFloat(r.value[1]);
+
+/* Nodes + pod count. Depends on node-exporter, and on kube-state-metrics for
+   the pod total only. */
+async function pollNodes() {
+  const [cpu, mem, podCount, roles] = await Promise.all([
+    query(QUERIES.cpu),
+    query(QUERIES.mem),
+    query(QUERIES.pods).catch(() => []),
+    query(QUERIES.roles).catch(() => [])
+  ]);
+
+  /* `instance` is the node name once relabelled, but stays IP:port if the
+     relabeling is missing — splitting on ":" handles both. */
+  const short = (s) => String(s || "").split(":")[0];
+
+  const roleOf = {};
+  roles.forEach((r) => {
+    const n = short(r.metric.node);
+    /* A node can hold several roles; control-plane is the interesting one. */
+    if (!roleOf[n] || r.metric.role === "control-plane") roleOf[n] = r.metric.role;
+  });
+
+  const acc = {};
+  cpu.forEach((r) => { acc[short(r.metric.instance)] = { cpu: num(r) / 100 }; });
+  mem.forEach((r) => {
+    const k = short(r.metric.instance);
+    acc[k] = Object.assign({}, acc[k], { mem: num(r) / 100 });
+  });
+
+  const names = Object.keys(acc).sort();
+  if (!names.length) throw new Error("no node series");
+
+  nodes = names.map((n) => ({
+    name: n,
+    role: roleOf[n] || "worker",
+    cpu: acc[n].cpu || 0,
+    mem: acc[n].mem || 0
+  }));
+  if (podCount.length) pods = Math.round(num(podCount[0]));
+}
+
+/* Deployments table. Kept in its own request/try so that kube-state-metrics
+   being absent degrades ONLY this panel — the node bars stay live. */
+async function pollDeployments() {
+  const [ready, spec, restarts] = await Promise.all([
+    query(QUERIES.deployReady),
+    query(QUERIES.deploySpec),
+    query(QUERIES.deployRestarts).catch(() => [])
+  ]);
+  if (!ready.length && !spec.length) throw new Error("no deployment series");
+
+  const key = (m) => m.namespace + "/" + m.deployment;
+  const rows = {};
+  spec.forEach((r) => { rows[key(r.metric)] = { name: r.metric.deployment, ns: r.metric.namespace, want: num(r), have: 0, restarts: 0 }; });
+  ready.forEach((r) => {
+    const k = key(r.metric);
+    rows[k] = Object.assign({ name: r.metric.deployment, ns: r.metric.namespace, want: 0, restarts: 0 }, rows[k], { have: num(r) });
+  });
+  restarts.forEach((r) => { if (rows[key(r.metric)]) rows[key(r.metric)].restarts = num(r); });
+
+  deployments = Object.values(rows)
+    /* Busiest first, then alphabetical — keeps the table stable between
+       refreshes instead of reshuffling on every poll. */
+    .sort((a, b) => b.want - a.want || (a.ns + a.name).localeCompare(b.ns + b.name))
+    .slice(0, CONFIG.maxDeployments)
+    .map((d) => ({ name: d.name, ns: d.ns, ready: d.have + "/" + d.want, restarts: d.restarts }));
+}
+
+async function poll() {
+  try {
+    await pollNodes();
+    live = true;
+    $("updated-label").textContent = "updated " + two(new Date().getHours()) + ":" + two(new Date().getMinutes());
+  } catch (e) {
+    live = false;
+  }
+  try {
+    await pollDeployments();
+  } catch (e) {
+    /* Leave the previous/fallback rows in place rather than blanking the
+       table — a static list beats an empty panel. */
+  }
+  renderNodes();
+  renderDeployments();
+  renderStatus();
+}
+
+/* ── theme ──────────────────────────────────────────────────────────────── */
+const saved = localStorage.getItem("jgm-theme");
+if (saved) document.documentElement.dataset.theme = saved;
+function syncToggle() {
+  $("theme-toggle").textContent = document.documentElement.dataset.theme === "dark" ? "Light" : "Dark";
+}
+$("theme-toggle").addEventListener("click", () => {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem("jgm-theme", next);
+  syncToggle();
+});
+
+/* ── boot ───────────────────────────────────────────────────────────────── */
+syncToggle();
+renderStatic();
+renderNodes();
+renderDeployments();
+renderStatus();
+clock();
+setInterval(clock, 30000);
+poll();
+setInterval(poll, CONFIG.refreshSeconds * 1000);
+</script>
+</body>
+</html>

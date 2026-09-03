@@ -8,7 +8,14 @@ clusters/rpi-cluster/
   platform/                      cluster-wide infrastructure Applications
   apps/                          workload Applications, one file per app
 apps/<name>/                     the actual Helm chart for each workload (Chart.yaml, values.yaml, templates/)
+site/                            source for the resume site image (not synced by ArgoCD)
 ```
+
+`site/` is the odd one out: it holds the HTML/CSS and Dockerfile that become
+the container image, not anything applied to the cluster. ArgoCD's root
+Application only watches `clusters/rpi-cluster`, so nothing under `site/` is
+ever synced — including the legacy `site/k8s.yaml`, which is superseded by
+`apps/resume` and kept only as a plain-manifest reference.
 
 ## Pattern: app-of-apps
 
@@ -45,7 +52,7 @@ instead of fighting a differently-configured install.
 | ArgoCD | `platform/argocd.yaml` | manages itself |
 | Traefik | `platform/traefik.yaml` | DaemonSet, hostPort 80/443 |
 | kube-prometheus-stack | `platform/prometheus.yaml` | Prometheus + node-exporter + kube-state-metrics; Grafana and Alertmanager off |
-| resume site | `apps/resume.yaml` → `apps/resume/` | queries Prometheus through a same-origin proxy |
+| resume site | `apps/resume.yaml` → `apps/resume/` | image built from `site/`; queries Prometheus through a same-origin proxy |
 
 ### Traefik
 
