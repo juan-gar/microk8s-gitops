@@ -1,0 +1,31 @@
+# ArgoCD manages its own installation from here on, using the same chart and
+# values it was manually bootstrapped with (see ../../../bootstrap and
+# README.md). This is what makes ArgoCD upgrades/config changes go through
+# the normal GitOps flow instead of manual `helm upgrade` commands.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd
+  namespace: argocd
+spec:
+  project: default
+  sources:
+    - repoURL: https://argoproj.github.io/argo-helm
+      chart: argo-cd
+      targetRevision: 10.6.4
+      helm:
+        valueFiles:
+          - $values/clusters/rpi-cluster/platform/argocd-values.yaml
+    - repoURL: https://github.com/juan-gar/microk8s-gitops.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

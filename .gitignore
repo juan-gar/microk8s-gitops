@@ -1,0 +1,8 @@
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# never commit real secrets - use sealed-secrets/SOPS once that's scaffolded
+*.secret.yaml
+secrets.yaml
