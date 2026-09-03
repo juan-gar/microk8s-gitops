@@ -1,0 +1,36 @@
+# Traefik ingress controller.
+#
+# microk8s also ships an nginx-based `ingress` addon (`microk8s enable
+# ingress`). Do NOT run both - two controllers claiming the same Ingress
+# objects and both wanting :80/:443 on the host is a bad time. This repo
+# standardises on Traefik because the site's Ingress was written for it; if
+# you prefer the addon instead, delete this file and set
+# ingress.className: public in apps/resume/values.yaml.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: traefik
+  namespace: argocd
+spec:
+  project: default
+  sources:
+    - repoURL: https://traefik.github.io/charts
+      chart: traefik
+      targetRevision: 41.4.0
+      helm:
+        releaseName: traefik
+        valueFiles:
+          - $values/clusters/rpi-cluster/platform/traefik-values.yaml
+    - repoURL: https://github.com/juan-gar/microk8s-gitops.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: traefik
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
