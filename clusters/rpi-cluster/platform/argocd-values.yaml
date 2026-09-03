@@ -1,0 +1,81 @@
+# Helm values for the argo/argo-cd chart, applied both at manual bootstrap
+# time and afterwards by ArgoCD managing itself (see argocd.yaml). Keep the
+# two in sync - the values used to bootstrap must match the values ArgoCD
+# then adopts, or the first self-managed sync will fight the install.
+#
+# Trimmed down for a 3-node Raspberry Pi cluster: no HA components, modest
+# resource requests, notifications/applicationset left on since they're cheap
+# and useful, Dex left off since we don't need SSO for a homelab.
+
+global:
+  # argo-helm auto-detects arm64, but pin the tolerations/affinity story here
+  # later if the Pis end up tainted/labelled for scheduling.
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+redis-ha:
+  enabled: false
+
+redis:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+
+controller:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+server:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  # ClusterIP for now; expose via an Ingress/MetalLB LoadBalancer once
+  # platform networking is scaffolded.
+  service:
+    type: ClusterIP
+
+repoServer:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 25m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+applicationSet:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+
+notifications:
+  enabled: true
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+
+dex:
+  enabled: false
