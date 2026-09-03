@@ -1,0 +1,169 @@
+{{- /*
+The main workload. This file is where most of Helm's control flow shows up,
+so it is the one worth reading closely.
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "resume.fullname" . }}
+  labels:
+    {{- /*
+      `include` returns a string; `nindent 4` indents every line of it by 4
+      and prepends a newline. Use nindent (not indent) after a `key:` so the
+      block starts on its own line. The leading {{- swallows the newline that
+      would otherwise leave a blank line here.
+    */}}
+    {{- include "resume.componentLabels" (dict "ctx" . "component" "web") | nindent 4 }}
+spec:
+  {{- /*
+    When the HPA owns the replica count, this chart must not also set it -
+    otherwise every `helm upgrade`/ArgoCD sync resets the count and fights the
+    autoscaler. Omitting the field entirely is the correct behaviour.
+  */}}
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "resume.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- /*
+          The checksum/config trick: hash the rendered ConfigMap and stamp it
+          onto the pod template. Changing nginx.conf then changes this
+          annotation, which changes the pod spec, which triggers a rolling
+          restart. Without it, a ConfigMap edit updates the ConfigMap and the
+          running pods keep serving the OLD config until something unrelated
+          restarts them - a genuinely baffling bug the first time you hit it.
+
+          $ is the ROOT context, always. Inside a `range` or `with`, "." is
+          rebound to the loop item, but $ still reaches .Values and .Chart.
+        */}}
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- /*
+          `with` sets "." to the given value for the block AND skips the block
+          entirely when that value is empty. That double duty is why charts use
+          `with` rather than `if` for optional passthrough blocks: no empty
+          `annotations:` key is emitted when the map is empty.
+        */}}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "resume.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "resume.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: {{ include "resume.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.containerPort }}
+              protocol: TCP
+          {{- if .Values.probes.liveness.enabled }}
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            {{- /*
+              `omit` copies the map minus the listed keys - here dropping our
+              own "enabled" flag, which is chart bookkeeping and not a field
+              Kubernetes understands. Passing it through would fail validation.
+            */}}
+            {{- toYaml (omit .Values.probes.liveness "enabled") | nindent 12 }}
+          {{- end }}
+          {{- if .Values.probes.readiness.enabled }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            {{- toYaml (omit .Values.probes.readiness "enabled") | nindent 12 }}
+          {{- end }}
+          {{- with .Values.env }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d
+              readOnly: true
+            {{- if .Values.extraFiles }}
+            {{- /*
+              Iterate a map with two loop variables. `range $name, $content`
+              gives key and value; the key becomes both the ConfigMap item key
+              and the filename on disk. subPath mounts a single file into a
+              directory without hiding the directory's other contents.
+            */}}
+            {{- range $name, $content := .Values.extraFiles }}
+            - name: extra-files
+              mountPath: /usr/share/nginx/html/{{ $name }}
+              subPath: {{ $name }}
+              readOnly: true
+            {{- end }}
+            {{- end }}
+            {{- /*
+              readOnlyRootFilesystem: true means nginx cannot write anywhere,
+              but it needs scratch space for temp files and its cache. emptyDir
+              volumes give it writable tmpfs at exactly those paths while the
+              rest of the filesystem stays immutable.
+            */}}
+            - name: tmp
+              mountPath: /tmp
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: {{ include "resume.fullname" . }}-nginx
+        {{- if .Values.extraFiles }}
+        - name: extra-files
+          configMap:
+            name: {{ include "resume.fullname" . }}-files
+        {{- end }}
+        - name: tmp
+          emptyDir: {}
+        - name: nginx-cache
+          emptyDir: {}
+      {{- /*
+        Spread replicas across the three Pis. `gt (int .Values.replicaCount) 1`
+        - Helm's comparison functions are prefix-form: gt/lt/eq/ne take their
+        operands as arguments. `int` because a value from YAML may arrive as a
+        float and gt would then compare the wrong type.
+      */}}
+      {{- if and .Values.topologySpreadEnabled (gt (int .Values.replicaCount) 1) }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "resume.selectorLabels" . | nindent 14 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

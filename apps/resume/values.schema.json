@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "resume chart values",
+  "description": "JSON Schema for values.yaml. Helm validates the MERGED values (defaults + any -f files + --set flags) against this on lint, template, install and upgrade. This is what turns a silent typo into an immediate, readable error: without a schema, misspelling `replicaCount` as `replicaCounts` just adds an ignored key and quietly deploys 1 replica forever. Note `additionalProperties` is deliberately left permissive so that adding a value does not require touching this file in lockstep; tighten it if you want the stricter contract.",
+  "type": "object",
+  "required": ["image", "service", "resources"],
+  "properties": {
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Ignored when autoscaling.enabled is true."
+    },
+    "image": {
+      "type": "object",
+      "required": ["repository"],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": "string",
+          "description": "Empty means fall back to .Chart.AppVersion."
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^(sha256:[a-f0-9]{64})?$",
+          "description": "Empty, or a full sha256 digest. The pattern catches a truncated or malformed digest at render time rather than at image pull."
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
+        }
+      }
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string" }
+        }
+      }
+    },
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": { "type": "string" },
+    "serviceAccount": {
+      "type": "object",
+      "properties": {
+        "create": { "type": "boolean" },
+        "name": { "type": "string" },
+        "annotations": { "type": "object" },
+        "automountServiceAccountToken": { "type": "boolean" }
+      }
+    },
+    "service": {
+      "type": "object",
+      "required": ["type", "port"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["ClusterIP", "NodePort", "LoadBalancer"]
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "containerPort": {
+      "type": "integer",
+      "minimum": 1024,
+      "maximum": 65535,
+      "description": "Minimum 1024 because the pod runs as non-root and cannot bind a privileged port. Encoding that constraint here means an invalid value fails at lint time instead of as a CrashLoopBackOff."
+    },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "className": { "type": "string" },
+        "annotations": { "type": "object" },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["host", "paths"],
+            "properties": {
+              "host": { "type": "string", "minLength": 1 },
+              "paths": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["path"],
+                  "properties": {
+                    "path": { "type": "string" },
+                    "pathType": {
+                      "type": "string",
+                      "enum": ["Exact", "Prefix", "ImplementationSpecific"]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tls": { "type": "array" }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "requests": { "type": "object" },
+        "limits": { "type": "object" }
+      }
+    },
+    "autoscaling": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "minReplicas": { "type": "integer", "minimum": 1 },
+        "maxReplicas": { "type": "integer", "minimum": 1 },
+        "targetCPUUtilizationPercentage": {
+          "type": ["integer", "string"]
+        },
+        "targetMemoryUtilizationPercentage": {
+          "type": ["integer", "string"],
+          "description": "Typed as integer OR string so that the empty-string default in values.yaml validates. A cleaner alternative is null plus \"type\": [\"integer\", \"null\"]."
+        }
+      }
+    },
+    "podSecurityContext": { "type": "object" },
+    "securityContext": { "type": "object" },
+    "probes": {
+      "type": "object",
+      "properties": {
+        "liveness": { "type": "object" },
+        "readiness": { "type": "object" }
+      }
+    },
+    "prometheus": {
+      "type": "object",
+      "properties": {
+        "proxy": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "url": {
+              "type": "string",
+              "pattern": "^https?://[^/]+$",
+              "description": "Scheme + host[:port], no trailing path — the template appends /api/v1/query itself. The pattern rejects a trailing slash, which would render as a double slash and 404."
+            },
+            "resolver": {
+              "type": "string",
+              "pattern": "^(\\d{1,3}\\.){3}\\d{1,3}$",
+              "description": "Must be an IP literal. nginx's resolver directive cannot itself resolve a hostname, and a name here fails at nginx startup — i.e. CrashLoopBackOff, not a degraded panel."
+            },
+            "rateLimit": { "type": "integer", "minimum": 1 },
+            "rateLimitBurst": { "type": "integer", "minimum": 0 },
+            "connectTimeout": {
+              "type": "string",
+              "pattern": "^[0-9]+(ms|s|m)$",
+              "description": "An nginx time value. A bare number is legal nginx (seconds) but the unit is required here to keep intent explicit."
+            },
+            "readTimeout": {
+              "type": "string",
+              "pattern": "^[0-9]+(ms|s|m)$"
+            }
+          }
+        }
+      }
+    },
+    "nginx": {
+      "type": "object",
+      "properties": {
+        "extraServerConfig": { "type": "string" },
+        "assetCacheSeconds": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "env": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string" }
+        }
+      }
+    },
+    "extraFiles": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "filename -> file contents. additionalProperties constrains the VALUES of arbitrary keys, which is how you type a free-form map."
+    },
+    "nodeSelector": { "type": "object" },
+    "tolerations": { "type": "array" },
+    "affinity": { "type": "object" },
+    "topologySpreadEnabled": { "type": "boolean" },
+    "podAnnotations": { "type": "object" },
+    "podLabels": { "type": "object" }
+  }
+}

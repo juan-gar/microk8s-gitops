@@ -8,7 +8,15 @@ clusters/rpi-cluster/
   platform/                      cluster-wide infrastructure Applications
   apps/                          workload Applications, one file per app
 apps/<name>/                     the actual Helm chart for each workload (Chart.yaml, values.yaml, templates/)
+site/                            source for the resume site image (built by CI, not synced by ArgoCD)
+.github/workflows/               image build + digest write-back
 ```
+
+`site/` is the odd one out: it holds the HTML/CSS and Dockerfile that become
+the container image, not anything applied to the cluster. ArgoCD's root
+Application only watches `clusters/rpi-cluster`, so nothing under `site/` is
+ever synced — including the legacy `site/k8s.yaml`, which is superseded by
+`apps/resume` and kept only as a plain-manifest reference.
 
 ## Pattern: app-of-apps
 
@@ -45,6 +53,7 @@ instead of fighting a differently-configured install.
 | ArgoCD | `platform/argocd.yaml` | manages itself |
 | Traefik | `platform/traefik.yaml` | DaemonSet, hostPort 80/443 |
 | kube-prometheus-stack | `platform/prometheus.yaml` | Prometheus + node-exporter + kube-state-metrics; Grafana and Alertmanager off |
+| resume site | `apps/resume.yaml` → `apps/resume/` | image built from `site/`; queries Prometheus through a same-origin proxy |
 
 ### Traefik
 
@@ -69,6 +78,40 @@ page stays honest.
 One relabeling worth knowing about: the node-exporter ServiceMonitor rewrites
 the `instance` label to the node name. Without it, anything querying these
 series sees pod IPs instead of `pi-01`.
+
+## How the resume site gets its cluster data
+
+```
+browser ──> Traefik ──> resume pod (nginx)
+                          │  location = /api/v1/query
+                          └──> prometheus-kube-prometheus-prometheus.monitoring:9090
+```
+
+The page's JavaScript calls `/api/v1/query` on its own origin; nginx proxies
+that single endpoint to Prometheus inside the cluster. Prometheus is never
+exposed through an Ingress, and there is no CORS to configure.
+
+Two coupling points to remember, because nothing enforces them:
+
+1. `prometheus.proxy.url` in `apps/resume/values.yaml` must match the Service
+   name produced by `releaseName:` in `platform/prometheus.yaml`.
+2. The node-exporter `instance` relabeling in `platform/prometheus-values.yaml`
+   is what makes the site show node names instead of pod IPs.
+
+## Adding a new app
+
+1. Copy `apps/resume/` to `apps/<name>/`, edit the chart. Rename the
+   `resume.*` named templates in `_helpers.tpl` to match - template names are
+   global across a chart and its subcharts, so leaving them collides.
+2. Copy `clusters/rpi-cluster/apps/resume.yaml` to
+   `clusters/rpi-cluster/apps/<name>.yaml`, update `metadata.name`,
+   `spec.source.path`, and `spec.destination.namespace`.
+3. Commit and push. ArgoCD picks it up on its next reconcile (default: 3m,
+   or immediately if `argocd app sync root` is run).
+
+`apps/resume` is written as the reference chart for this repo - heavily
+commented, and exercising the Helm features you'd reach for in a real chart.
+See [`helm-workflow.md`](helm-workflow.md) for the local edit/verify loop.
 
 ## Adding a platform component
 
