@@ -28,7 +28,7 @@ image:
   # is immutable, which is what you actually want in GitOps. Once you have a
   # build pipeline, have it write the digest here.
   # e.g. sha256:abc123...
-  digest: ""
+  digest: "sha256:beb33ab61180a9d4b8c49b11907f3162f950a17c10877745f3a686b53346919f"
   pullPolicy: IfNotPresent
 
 # -- Secrets for pulling from a private registry. List of {name: secret-name}.
