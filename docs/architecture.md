@@ -10,6 +10,7 @@ clusters/rpi-cluster/
 apps/<name>/                     the actual Helm chart for each workload (Chart.yaml, values.yaml, templates/)
 site/                            source for the resume site image (built by CI, not synced by ArgoCD)
 .github/workflows/               image build + digest write-back
+docs/rebuild.md                  rebuilding the cluster from scratch
 ```
 
 `site/` is the odd one out: it holds the HTML/CSS and Dockerfile that become
@@ -52,7 +53,7 @@ instead of fighting a differently-configured install.
 | --- | --- | --- |
 | ArgoCD | `platform/argocd.yaml` | manages itself |
 | Traefik | `platform/traefik.yaml` | DaemonSet, hostPort 80/443 |
-| kube-prometheus-stack | `platform/prometheus.yaml` | Prometheus + node-exporter + kube-state-metrics; Grafana and Alertmanager off |
+| kube-prometheus-stack | `platform/prometheus.yaml` | Prometheus + Grafana + node-exporter + kube-state-metrics; Alertmanager off |
 | resume site | `apps/resume.yaml` → `apps/resume/` | image built from `site/`; queries Prometheus through a same-origin proxy |
 
 ### Traefik
@@ -62,18 +63,53 @@ because there is no LoadBalancer implementation on bare metal until MetalLB is
 scaffolded. One Traefik per node means any Pi's IP serves the cluster's
 Ingresses, so DNS can point at any of them.
 
-microk8s also ships an nginx-based `ingress` addon. Running both is a
-conflict: two controllers claiming the same Ingress objects and both wanting
-:80/:443 on the host. This repo standardises on Traefik.
+microk8s also ships an nginx-based `ingress` addon. Leave it disabled: two
+controllers claiming the same Ingress objects and both wanting :80/:443 is a
+conflict, and both mark their IngressClass as default — leaving two defaults,
+at which point any Ingress without an explicit `className` is ambiguous.
+
+Always set `spec.ingressClassName` explicitly anyway, as `apps/resume` and the
+Grafana values do. It costs nothing and survives this kind of mistake.
+
+### The Service type trap
+
+The chart's Service type lives at **`service.spec.type`**, not `service.type`.
+A top-level `service.type` is silently ignored — the values schema accepts the
+stray key and the default (`LoadBalancer`) applies anyway. That is how an
+earlier version of this file ended up putting Traefik on a MetalLB address
+another gateway already held, with overlapping :80/:443.
+
+Since Traefik here is a DaemonSet with `hostPort`, it wants `ClusterIP` and no
+LoadBalancer address at all. Verify after any change to this file:
+
+```sh
+helm template traefik traefik/traefik --version 41.4.0 \
+  -f clusters/rpi-cluster/platform/traefik-values.yaml \
+  | grep -A2 'kind: Service'
+```
+
+The general lesson: a values key that does nothing produces no error anywhere.
+Check the rendered output, not the values file.
 
 ### Prometheus
 
 kube-prometheus-stack rather than the bare prometheus chart, because the
 bundle also brings node-exporter (node CPU/memory series) and
-kube-state-metrics (`kube_*` series). Grafana and Alertmanager are disabled to
-save memory, and the control-plane scrape targets microk8s does not expose
-(scheduler, controller-manager, proxy, etcd) are turned off so the targets
-page stays honest.
+kube-state-metrics (`kube_*` series) — the latter being what the resume site's
+pod count, deployments table and node roles depend on.
+
+Grafana is enabled and is the only Grafana in the cluster. The chart
+provisions the standard Kubernetes dashboards automatically; add custom ones
+under `grafana.dashboards` in `prometheus-values.yaml` so they are
+version-controlled rather than living only in the pod.
+
+Do **not** also enable the microk8s `prometheus` addon — it installs a second,
+unmanaged operator.
+
+Alertmanager stays disabled (no paging setup on a homelab), and the
+control-plane scrape targets microk8s does not expose (scheduler,
+controller-manager, proxy, etcd) are turned off so the targets page stays
+honest.
 
 One relabeling worth knowing about: the node-exporter ServiceMonitor rewrites
 the `instance` label to the node name. Without it, anything querying these
@@ -128,3 +164,26 @@ Two options that matter for real charts, both used by `prometheus.yaml`:
   "metadata.annotations: Too long".
 - `SkipDryRunOnMissingResource=true` — lets the first sync proceed when a
   resource's CRD is installed by that same chart.
+
+## Before deleting anything in the cluster
+
+Deleting and letting ArgoCD reinstall is not symmetric: the delete needs a
+healthy control plane, the reinstall needs a healthy control plane *and* a
+working ArgoCD. `kubectl delete namespace` in particular is finalised by the
+namespace controller inside kube-controller-manager — if that controller is not
+reconciling, the namespace sticks in `Terminating` forever and clearing it
+means editing finalizers by hand.
+
+One command tells you whether the control plane is actually working. A healthy
+controller-manager creates the ReplicaSet within a second or two:
+
+```sh
+kubectl create deployment ctrltest --image=busybox:1.36 -- sleep 60
+kubectl get rs -l app=ctrltest        # non-empty immediately = safe to proceed
+kubectl delete deployment ctrltest
+```
+
+Leases are not a health check. Both the scheduler and controller-manager can
+keep renewing their leader lease while doing no work at all, which means
+leadership never fails over and `kubectl get lease` looks fine while nothing
+reconciles. Test behaviour, not liveness.

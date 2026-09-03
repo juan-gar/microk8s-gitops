@@ -7,6 +7,8 @@ cluster.
   and platform components.
 - [`docs/helm-workflow.md`](docs/helm-workflow.md) — the local Helm loop, and a
   map of which Helm concept is demonstrated in which file.
+- [`docs/rebuild.md`](docs/rebuild.md) — rebuilding the Pis from scratch: what
+  to back up, hardware and HA decisions, and the verification checklist.
 
 ## Repo layout
 
@@ -24,11 +26,22 @@ site/                            source for the resume site image (built by CI)
 Assumes microk8s is installed and running on all three Pis, with a single
 `kubectl`/`helm3` context pointed at the cluster.
 
-1. Enable required microk8s addons:
+> Rebuilding the Pis from scratch? Follow [`docs/rebuild.md`](docs/rebuild.md)
+> first — it covers what to back up, the hardware and HA decisions that must be
+> made before install, and lands you exactly at step 1 below.
+
+1. Enable required microk8s addons — and only these:
 
    ```sh
    microk8s enable dns hostpath-storage helm3
    ```
+
+   **Do not enable `ingress`, `prometheus`, `metrics-server` or `cert-manager`.**
+   Each duplicates something this repo manages, and the duplicate is the one
+   that isn't in git. In particular `ingress` installs a second controller that
+   fights Traefik for :80/:443 and marks its own IngressClass default, leaving
+   two defaults — at which point any Ingress without an explicit `className` is
+   ambiguous. Always set `className: traefik` regardless.
 
 2. Install ArgoCD via Helm, using the same chart version and values this
    repo uses to manage ArgoCD afterwards:
@@ -61,9 +74,6 @@ Assumes microk8s is installed and running on all three Pis, with a single
    first, and on Pi hardware the whole stack can take several minutes to go
    Healthy. `Progressing` is expected for a while.
 
-   Do **not** also run `microk8s enable ingress` — that installs a second
-   ingress controller which will fight Traefik for ports 80/443.
-
 From here, all changes - including upgrading ArgoCD itself - go through
 git: edit a manifest, commit, push, let ArgoCD sync.
 
@@ -71,8 +81,8 @@ git: edit a manifest, commit, push, let ArgoCD sync.
 
 - **ArgoCD**, self-managed via the app-of-apps pattern.
 - **Traefik**, a DaemonSet binding hostPort 80/443 on every Pi.
-- **kube-prometheus-stack** — Prometheus, node-exporter and kube-state-metrics,
-  tuned down for Pi hardware (Grafana and Alertmanager off).
+- **kube-prometheus-stack** — Prometheus, Grafana, node-exporter and
+  kube-state-metrics, tuned down for Pi hardware (Alertmanager off).
 - **`apps/resume`** — the resume site chart, and the reference chart for this
   repo. Heavily commented as a Helm tutorial; copy it for new apps.
 
@@ -92,7 +102,9 @@ path.
 2. **Point DNS at a Pi.** `ingress.hosts[0].host` is `resume.lan`. Traefik runs
    on every node with hostPort 80, so any node's IP works; an `/etc/hosts`
    entry is enough to test.
-3. **Check the proxy target** matches your cluster:
+3. **Check the two values that depend on cluster specifics.** Both defaults
+   assume a stock microk8s install and are usually right, but nothing enforces
+   them — a mismatch shows up as panels stuck on cached values, not an error:
    ```sh
    microk8s kubectl get svc -n monitoring            # prometheus.proxy.url
    microk8s kubectl get svc -n kube-system kube-dns  # prometheus.proxy.resolver
@@ -104,7 +116,7 @@ Prometheus and its panels fall back to cached values. The one failure mode that
 resolve) is deliberately avoided; see the comments in
 `apps/resume/templates/configmap.yaml`.
 
-Not yet scaffolded: persistent storage beyond Prometheus's hostpath PVC,
-cert-manager/TLS, MetalLB, and secrets management (SOPS/sealed-secrets). Add
+Not yet scaffolded: cert-manager/TLS, MetalLB, and secrets management
+(SOPS/sealed-secrets). Add
 each as a new file under `clusters/rpi-cluster/platform/` following the
 pattern in `traefik.yaml`.

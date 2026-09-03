@@ -21,10 +21,51 @@ kubeEtcd:
 alertmanager:
   enabled: false
 
-# Grafana is off to save memory - the resume site is the dashboard. Flip to
-# true if you want real dashboards; budget ~150Mi.
+# Grafana is ON because this stack REPLACES the cluster's previous hand-rolled
+# Grafana in the monitoring namespace. Turning it off here would mean losing
+# dashboards entirely rather than swapping which Grafana serves them.
+#
+# The chart ships the standard Kubernetes dashboards (nodes, pods, workloads,
+# and one per control-plane component) provisioned automatically, so the
+# out-of-the-box view is decent. Any custom dashboards from the old install
+# are NOT carried over - they were never in git. Add them under
+# `dashboardsConfigMaps` or `dashboards` here so they are from now on.
 grafana:
-  enabled: false
+  enabled: true
+
+  # Default login is admin / prom-operator. Change it: set a password here and
+  # move it into a Secret once secrets management is scaffolded.
+  adminPassword: prom-operator
+
+  resources:
+    requests:
+      cpu: 25m
+      memory: 96Mi
+    limits:
+      # Grafana is a Go binary plus a JS frontend; 256Mi is comfortable for a
+      # handful of dashboards on a Pi.
+      memory: 256Mi
+
+  # Reachable at grafana.lan once Traefik is the only ingress controller.
+  # Same className the resume site uses - see apps/resume/values.yaml.
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hosts:
+      - grafana.lan
+    path: /
+    pathType: Prefix
+
+  # Persist dashboards/users across restarts. Without this, anything created
+  # through the UI is lost on every pod restart - which, on a cluster whose
+  # nodes have been flapping, is often.
+  persistence:
+    enabled: true
+    type: sts
+    storageClassName: microk8s-hostpath
+    accessModes:
+      - ReadWriteOnce
+    size: 2Gi
 
 # --- The actual scrapers the resume site depends on ---------------------------
 # node-exporter -> node_cpu_seconds_total, node_memory_* (the CPU/memory bars)
