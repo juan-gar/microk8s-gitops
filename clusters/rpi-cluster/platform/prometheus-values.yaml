@@ -46,15 +46,22 @@ grafana:
       # handful of dashboards on a Pi.
       memory: 256Mi
 
-  # Reachable at grafana.lan once Traefik is the only ingress controller.
-  # Same className the resume site uses - see apps/resume/values.yaml.
+  # Reachable at grafana.lan via the cluster's shared Envoy Gateway - same
+  # Gateway the resume site uses, see apps/resume/values.yaml's `route`
+  # block. `route.main` is upstream BETA in this chart version; if it
+  # misbehaves, the fallback is a hand-written HTTPRoute in the same shape as
+  # apps/resume/templates/httproute.yaml.
   ingress:
-    enabled: true
-    ingressClassName: traefik
-    hosts:
-      - grafana.lan
-    path: /
-    pathType: Prefix
+    enabled: false
+  route:
+    main:
+      enabled: true
+      hostnames:
+        - grafana.lan
+      parentRefs:
+        - name: eg
+          namespace: envoy-gateway-system
+          sectionName: http
 
   # Persist dashboards/users across restarts. Without this, anything created
   # through the UI is lost on every pod restart - which, on a cluster whose

@@ -1,0 +1,23 @@
+{{- /*
+Gateway API's HTTPRoute, replacing the old Ingress (still in ingress.yaml,
+kept as a disabled fallback). Structurally the same trick as ingress.yaml:
+capture $fullName before anything that might rebind ".", then reuse it.
+*/}}
+{{- if .Values.route.enabled -}}
+{{- $fullName := include "resume.fullname" . -}}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "resume.componentLabels" (dict "ctx" . "component" "web") | nindent 4 }}
+spec:
+  parentRefs:
+    {{- toYaml .Values.route.parentRefs | nindent 4 }}
+  hostnames:
+    {{- toYaml .Values.route.hostnames | nindent 4 }}
+  rules:
+    - backendRefs:
+        - name: {{ $fullName }}
+          port: {{ .Values.service.port }}
+{{- end }}

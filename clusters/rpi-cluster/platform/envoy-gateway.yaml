@@ -1,0 +1,57 @@
+# Envoy Gateway, replacing Traefik as the ingress path. Chosen over Cilium's
+# own Gateway API implementation because that requires kubeProxyReplacement
+# enabled, and this cluster deliberately keeps kube-proxy for now (see
+# cilium-values.yaml).
+#
+# Same multi-source convention as metallb.yaml: chart + this repo's values +
+# this repo's CR manifests (GatewayClass/Gateway), the latter living under
+# the top-level platform/envoy-gateway/, not clusters/rpi-cluster/, for the
+# same directory.recurse reason documented in metallb.yaml.
+#
+# NOTE ON THE OCI SOURCE: verify `repoURL`/`chart` here against how ArgoCD
+# 10.6.4 actually resolves it on first sync (`kubectl describe application
+# envoy-gateway -n argocd` if it errors) - OCI Helm source syntax has shifted
+# across ArgoCD releases.
+#
+# No HTTPS listener yet - TLS needs cert-manager, which is deferred. Traefik
+# used to terminate :443 with a self-signed cert; resume.lan/grafana.lan lose
+# HTTPS until cert-manager lands.
+#
+# KNOWN FOLLOW-UP: the chart's certgen Job is a Helm pre-install/pre-upgrade
+# hook, which ArgoCD ignores by this repo's convention. First install is
+# fine. A future chart version bump will fail on an immutable-field error
+# because the old Job blocks recreation - when bumping targetRevision, also
+# `kubectl delete job -n envoy-gateway-system eg-certgen` (name may include a
+# release-derived suffix - check first) or add `Replace=true` for that sync.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: envoy-gateway
+  namespace: argocd
+spec:
+  project: default
+  sources:
+    - repoURL: oci://docker.io/envoyproxy
+      chart: gateway-helm
+      targetRevision: 1.9.1
+      helm:
+        releaseName: eg
+        valueFiles:
+          - $values/clusters/rpi-cluster/platform/envoy-gateway-values.yaml
+    - repoURL: https://github.com/juan-gar/microk8s-gitops.git
+      targetRevision: main
+      ref: values
+    - repoURL: https://github.com/juan-gar/microk8s-gitops.git
+      targetRevision: main
+      path: platform/envoy-gateway
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: envoy-gateway-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true

@@ -51,7 +51,7 @@ prometheus:
 That name is derived from `releaseName: prometheus` in
 `clusters/rpi-cluster/platform/prometheus.yaml` plus the chart's own prefix.
 Rename the release and this must change too. Confirm against the cluster with
-`microk8s kubectl get svc -n monitoring`.
+`kubectl get svc -n monitoring`.
 
 ### Exact PromQL
 

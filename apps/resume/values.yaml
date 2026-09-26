@@ -61,30 +61,37 @@ service:
 # the nginx.conf in the ConfigMap.
 containerPort: 8080
 
+# -- Left in place, disabled, as a fallback: this is what fronted the site
+# before the move to Gateway API/Envoy Gateway. Flip `enabled: true` and
+# disable `route` below to roll back.
 ingress:
-  # -- Traefik is scaffolded in clusters/rpi-cluster/platform/traefik.yaml, so
-  # this can be on. If you deleted that and use the microk8s `ingress` addon
-  # instead, set className to "public".
-  enabled: true
+  enabled: false
   className: traefik
   annotations: {}
-  # -- Each host gets a list of paths. The template ranges over both, so this
-  # structure supports several hostnames pointing at the same Service.
-  #
-  # CHANGE THIS to whatever your router/DNS resolves to a Pi. `.lan` only
-  # works if your DNS serves it; a /etc/hosts entry pointing at any node's IP
-  # works too, since Traefik runs as a DaemonSet with hostPort 80.
   hosts:
     - host: resume.lan
       paths:
         - path: /
           pathType: Prefix
-  # -- TLS blocks, passed through nearly verbatim. With cert-manager installed
-  # you'd add its annotation above and name a secret here.
   tls: []
   #  - secretName: resume-tls
   #    hosts:
   #      - resume.local
+
+route:
+  # -- HTTPRoute via the cluster's shared Envoy Gateway
+  # (platform/envoy-gateway/gateway.yaml). Unlike Traefik's old hostPort
+  # DaemonSet, every hostname now resolves to ONE shared LoadBalancer IP -
+  # check `kubectl get svc -n envoy-gateway-system` for the actual address.
+  # No HTTPS listener yet; that needs cert-manager (not yet scaffolded).
+  enabled: true
+  parentRefs:
+    - name: eg
+      namespace: envoy-gateway-system
+      sectionName: http
+  # -- CHANGE THIS to whatever your router/DNS resolves to the Gateway's IP.
+  hostnames:
+    - resume.lan
 
 resources:
   # Requests are what the scheduler reserves; limits are what the kernel
@@ -158,14 +165,16 @@ prometheus:
     # prefix. If you rename that release, this MUST change to match.
     #
     # Verify it against the cluster with:
-    #   microk8s kubectl get svc -n monitoring
+    #   kubectl get svc -n monitoring
     url: http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090
 
     # -- DNS server nginx uses to resolve the above AT REQUEST TIME. Must be an
     # IP: nginx's `resolver` cannot bootstrap itself from a name. This is the
-    # microk8s CoreDNS default; confirm with
-    #   microk8s kubectl get svc -n kube-system kube-dns
-    resolver: 10.152.183.10
+    # kube-dns ClusterIP on this cluster's service subnet (kubeadm reserves
+    # .10 in whatever range kubeadm-config.yaml's serviceSubnet sets);
+    # confirm with:
+    #   kubectl get svc -n kube-system kube-dns
+    resolver: 10.96.0.10
 
     # -- Requests/second per client IP, and how many may burst above it.
     # The page makes 3 requests per refresh, so this is generous.

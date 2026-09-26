@@ -8,6 +8,7 @@ clusters/rpi-cluster/
   platform/                      cluster-wide infrastructure Applications
   apps/                          workload Applications, one file per app
 apps/<name>/                     the actual Helm chart for each workload (Chart.yaml, values.yaml, templates/)
+platform/<component>/            plain CR manifests for a platform Application's chart (see "Adding a platform component")
 site/                            source for the resume site image (built by CI, not synced by ArgoCD)
 .github/workflows/               image build + digest write-back
 docs/rebuild.md                  rebuilding the cluster from scratch
@@ -18,6 +19,13 @@ the container image, not anything applied to the cluster. ArgoCD's root
 Application only watches `clusters/rpi-cluster`, so nothing under `site/` is
 ever synced — including the legacy `site/k8s.yaml`, which is superseded by
 `apps/resume` and kept only as a plain-manifest reference.
+
+`platform/<component>/` is the newer sibling to `apps/<name>/`: a place for
+plain Kubernetes manifests (not a Helm chart) that belong to a platform
+Application - CRs like MetalLB's `IPAddressPool` or Envoy Gateway's
+`Gateway`. It lives outside `clusters/rpi-cluster` for the same reason
+`apps/` does: the root Application's `directory.recurse: true` watches
+`clusters/rpi-cluster` and would double-apply anything placed there directly.
 
 ## Pattern: app-of-apps
 
@@ -52,44 +60,72 @@ instead of fighting a differently-configured install.
 | Component | Source | Notes |
 | --- | --- | --- |
 | ArgoCD | `platform/argocd.yaml` | manages itself |
-| Traefik | `platform/traefik.yaml` | DaemonSet, hostPort 80/443 |
+| Cilium | `platform/cilium.yaml` | CNI; adopted from the kubeadm bootstrap install, manual sync until diff is confirmed empty |
+| MetalLB | `platform/metallb.yaml` + `platform/metallb/` | L2 mode, pool `192.168.0.210-192.168.0.230` |
+| Envoy Gateway | `platform/envoy-gateway.yaml` + `platform/envoy-gateway/` | Gateway API implementation; replaced Traefik |
 | kube-prometheus-stack | `platform/prometheus.yaml` | Prometheus + Grafana + node-exporter + kube-state-metrics; Alertmanager off |
 | resume site | `apps/resume.yaml` → `apps/resume/` | image built from `site/`; queries Prometheus through a same-origin proxy |
 
-### Traefik
+### Envoy Gateway
 
-Runs as a DaemonSet with `hostPort` 80/443 rather than a LoadBalancer Service,
-because there is no LoadBalancer implementation on bare metal until MetalLB is
-scaffolded. One Traefik per node means any Pi's IP serves the cluster's
-Ingresses, so DNS can point at any of them.
+Replaced Traefik when the cluster moved from microk8s to kubeadm. Chosen over
+Cilium's own Gateway API implementation because that requires
+`kubeProxyReplacement` enabled, and this cluster deliberately keeps kube-proxy
+for now (see `cilium-values.yaml`).
 
-microk8s also ships an nginx-based `ingress` addon. Leave it disabled: two
-controllers claiming the same Ingress objects and both wanting :80/:443 is a
-conflict, and both mark their IngressClass as default — leaving two defaults,
-at which point any Ingress without an explicit `className` is ambiguous.
+One `Gateway` (`platform/envoy-gateway/gateway.yaml`) serves every hostname,
+unlike Traefik's old per-node `hostPort` DaemonSet where any Pi's IP worked.
+The Gateway's auto-created Service is `type: LoadBalancer` and draws its
+single shared IP from the MetalLB pool - check
+`kubectl get svc -n envoy-gateway-system` for the actual address; nothing
+pins it to a specific one in this pass. Point DNS/hosts at that IP, not at a
+node.
 
-Always set `spec.ingressClassName` explicitly anyway, as `apps/resume` and the
-Grafana values do. It costs nothing and survives this kind of mistake.
+`HTTPRoute` resources attach to the Gateway via `parentRefs` (see
+`apps/resume/values.yaml`'s `route` block, or `grafana.route.main` in
+`prometheus-values.yaml`). There is no HTTPS listener yet - TLS needs
+cert-manager, which is deferred, so `resume.lan`/`grafana.lan` lose HTTPS
+until then.
 
-### The Service type trap
+Both the Gateway API CRDs and Envoy Gateway's own CRDs ship bundled in the
+`gateway-helm` chart's `crds` subchart (`crds.enabled: true` by default) - do
+not add a separate Gateway API CRDs Application; two Applications owning the
+same CRDs would fight over them.
 
-The chart's Service type lives at **`service.spec.type`**, not `service.type`.
-A top-level `service.type` is silently ignored — the values schema accepts the
-stray key and the default (`LoadBalancer`) applies anyway. That is how an
-earlier version of this file ended up putting Traefik on a MetalLB address
-another gateway already held, with overlapping :80/:443.
+**Known follow-up:** the chart's `certgen` Job is a Helm
+`pre-install`/`pre-upgrade` hook, which ArgoCD ignores by this repo's
+convention. A future `targetRevision` bump will fail on an immutable-field
+error because the old Job blocks recreation - delete it manually
+(`kubectl delete job -n envoy-gateway-system <name>`) as part of that sync,
+or add `Replace=true` for that one sync.
 
-Since Traefik here is a DaemonSet with `hostPort`, it wants `ClusterIP` and no
-LoadBalancer address at all. Verify after any change to this file:
+### Adopting an already-running release (Cilium)
 
-```sh
-helm template traefik traefik/traefik --version 41.4.0 \
-  -f clusters/rpi-cluster/platform/traefik-values.yaml \
-  | grep -A2 'kind: Service'
-```
+Cilium was installed by hand during the kubeadm cluster bootstrap, before
+ArgoCD existed. Bringing an existing release under GitOps management (rather
+than a fresh install) has one real risk: **values drift**, not resource
+identity. If the values committed to git don't exactly match what's already
+live, syncing changes the `cilium-config` ConfigMap, which restarts every
+agent DaemonSet pod on all three nodes at once - a cluster-wide networking
+blip, not a "just re-sync it" situation.
 
-The general lesson: a values key that does nothing produces no error anywhere.
-Check the rendered output, not the values file.
+The runbook `platform/cilium.yaml` follows:
+
+1. `helm get values cilium -n kube-system` to get the exact user-supplied
+   overrides (not `-a`, which dumps the full computed defaults too) - seed
+   `cilium-values.yaml` with exactly that.
+2. Commit with `platform/cilium.yaml`'s `syncPolicy` left **manual** (no
+   `automated` block) - deliberately, so the first sync doesn't happen
+   without a look.
+3. Once ArgoCD detects the Application, run `argocd app diff cilium`.
+4. Only once that diff is empty (or only adds ArgoCD's own tracking label),
+   sync once manually.
+5. Then, and only then, add the standard
+   `syncPolicy.automated: {prune: true, selfHeal: true}` block used by every
+   other platform Application here.
+
+This same pattern applies to adopting anything else already running unmanaged
+on the cluster.
 
 ### Prometheus
 
@@ -103,13 +139,13 @@ provisions the standard Kubernetes dashboards automatically; add custom ones
 under `grafana.dashboards` in `prometheus-values.yaml` so they are
 version-controlled rather than living only in the pod.
 
-Do **not** also enable the microk8s `prometheus` addon — it installs a second,
-unmanaged operator.
-
-Alertmanager stays disabled (no paging setup on a homelab), and the
-control-plane scrape targets microk8s does not expose (scheduler,
-controller-manager, proxy, etcd) are turned off so the targets page stays
-honest.
+Alertmanager stays disabled (no paging setup on a homelab). The control-plane
+ServiceMonitors (scheduler, controller-manager, proxy, etcd) stay off too -
+they were disabled because the old microk8s cluster bound those components to
+127.0.0.1, making them unreachable. kubeadm's defaults may well expose the
+scheduler and controller-manager on `0.0.0.0` now, which would make
+re-enabling them a real near-term improvement, but that's deferred to a later
+pass, not done here.
 
 One relabeling worth knowing about: the node-exporter ServiceMonitor rewrites
 the `instance` label to the node name. Without it, anything querying these
@@ -118,9 +154,9 @@ series sees pod IPs instead of `pi-01`.
 ## How the resume site gets its cluster data
 
 ```
-browser ──> Traefik ──> resume pod (nginx)
-                          │  location = /api/v1/query
-                          └──> prometheus-kube-prometheus-prometheus.monitoring:9090
+browser ──> Envoy Gateway ──> resume pod (nginx)
+                                │  location = /api/v1/query
+                                └──> prometheus-kube-prometheus-prometheus.monitoring:9090
 ```
 
 The page's JavaScript calls `/api/v1/query` on its own origin; nginx proxies
@@ -153,8 +189,18 @@ See [`helm-workflow.md`](helm-workflow.md) for the local edit/verify loop.
 
 Add a new `Application` under `clusters/rpi-cluster/platform/`. For
 third-party components prefer an Application sourced directly from the
-upstream Helm chart repo, like `traefik.yaml` does, over vendoring the chart
+upstream Helm chart repo, like `metallb.yaml` does, over vendoring the chart
 into this repo.
+
+If the component also needs plain CR manifests alongside its chart (an
+`IPAddressPool`, a `Gateway`, anything that isn't itself a Helm release), add
+a third source to the same Application pointing at
+`platform/<component>/` at the **top level of the repo** - see
+`metallb.yaml` or `envoy-gateway.yaml`. That path must NOT be under
+`clusters/rpi-cluster/`: the root Application's `directory.recurse: true`
+already watches that whole subtree, so a plain manifest placed there gets
+applied twice - once by `root`, once by the component's own Application - a
+real shared-resource conflict, not a hypothetical one.
 
 Two options that matter for real charts, both used by `prometheus.yaml`:
 

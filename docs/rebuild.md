@@ -1,5 +1,12 @@
 # Rebuilding the cluster from scratch
 
+> **This file predates the move from microk8s to kubeadm.** Steps 2 and 4
+> below (hardware/HA decisions, OS install and cluster formation) are
+> superseded by the separate kubeadm rebuild guide — follow that for
+> everything up through a working cluster. Steps 1 (what to back up), 3
+> (what's not coming back), 5's bootstrap command, and "Lessons the first
+> cluster taught" are still accurate and kept here.
+
 Written after the first cluster accumulated two years of undocumented state —
 a hand-rolled Prometheus, IngressClasses with no controller behind them, addons
 enabled and disabled inconsistently, and a service mesh nobody was using. The
@@ -153,15 +160,17 @@ kubectl get rs -l app=ctrltest && kubectl delete deployment ctrltest
 # every Application healthy
 kubectl get applications -n argocd
 
-# exactly one default IngressClass
-kubectl get ingressclass
+# exactly one GatewayClass (Gateway API replaced Ingress/IngressClass)
+kubectl get gatewayclass
 
 # no LoadBalancer IP claimed twice
 kubectl get svc -A --field-selector spec.type=LoadBalancer
 
 # pods can reach the service network from every node
+# (10.96.0.1 is the kubernetes.default ClusterIP on this cluster's service
+# subnet - confirm with `kubectl get svc kubernetes -o wide` if it changes)
 kubectl run nettest --image=busybox:1.36 --restart=Never -- \
-  sh -c 'nc -z 10.152.183.1 443 && echo OK || echo FAIL'
+  sh -c 'nc -z 10.96.0.1 443 && echo OK || echo FAIL'
 kubectl logs nettest; kubectl delete pod nettest
 ```
 

@@ -1,0 +1,15 @@
+# Envoy Gateway values, trimmed for Pi hardware.
+#
+# crds.enabled defaults to true and is left unset here deliberately - the
+# chart's own `crds` subchart bundles both Envoy Gateway's CRDs and the
+# Gateway API CRDs (experimental channel, bundle v1.6.1) in this same
+# release. Do NOT add a separate Gateway API CRDs Application: two
+# Applications both owning those CRD objects would fight over them.
+deployment:
+  envoyGateway:
+    resources:
+      requests:
+        cpu: 25m
+        memory: 96Mi
+      limits:
+        memory: 256Mi

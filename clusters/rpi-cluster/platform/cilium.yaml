@@ -1,0 +1,46 @@
+# Cilium CNI, adopting the release installed by hand during the kubeadm
+# cluster bootstrap (see the kubeadm rebuild guide, step 7).
+#
+# syncPolicy is deliberately MANUAL, unlike every other Application here.
+# This is an adoption, not a fresh install: the risk is values drift, not
+# resource identity. If cilium-values.yaml doesn't exactly match what's
+# already live, the cilium-config ConfigMap changes and every agent
+# DaemonSet pod on all 3 nodes restarts at once - a cluster-wide networking
+# blip, not a "just re-sync it" situation.
+#
+# Adoption runbook, in order:
+#   1. helm get values cilium -n kube-system   (confirm cilium-values.yaml
+#      matches exactly - it already does as of the values checked in here)
+#   2. Let ArgoCD detect this Application, then `argocd app diff cilium`
+#   3. Only once that diff is empty (or only adds ArgoCD's tracking label),
+#      sync manually once
+#   4. Then, and only then, add the standard
+#      `syncPolicy.automated: {prune: true, selfHeal: true}` block used by
+#      every other platform Application in this repo.
+# See docs/architecture.md for the full runbook.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cilium
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  project: default
+  sources:
+    - repoURL: https://helm.cilium.io/
+      chart: cilium
+      targetRevision: 1.20.2
+      helm:
+        releaseName: cilium
+        valueFiles:
+          - $values/clusters/rpi-cluster/platform/cilium-values.yaml
+    - repoURL: https://github.com/juan-gar/microk8s-gitops.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    syncOptions:
+      - ServerSideApply=true

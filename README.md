@@ -1,6 +1,6 @@
 # microk8s-gitops
 
-GitOps source of truth for ArgoCD running on a 3-node Raspberry Pi microk8s
+GitOps source of truth for ArgoCD running on a 3-node Raspberry Pi kubeadm
 cluster.
 
 - [`docs/architecture.md`](docs/architecture.md) — repo layout, how to add apps
@@ -23,56 +23,52 @@ site/                            source for the resume site image (built by CI)
 
 ## Bootstrapping a fresh cluster
 
-Assumes microk8s is installed and running on all three Pis, with a single
-`kubectl`/`helm3` context pointed at the cluster.
+Assumes kubeadm is installed and running on all three Pis (see the separate
+kubeadm rebuild guide for OS/cluster-formation steps), with `kubectl`/`helm`
+pointed at the cluster.
 
 > Rebuilding the Pis from scratch? Follow [`docs/rebuild.md`](docs/rebuild.md)
-> first — it covers what to back up, the hardware and HA decisions that must be
-> made before install, and lands you exactly at step 1 below.
+> first for what to back up and the hardware decisions that must be made
+> before install; OS/cluster formation itself now follows the separate
+> kubeadm guide, not this file.
 
-1. Enable required microk8s addons — and only these:
-
-   ```sh
-   microk8s enable dns hostpath-storage helm3
-   ```
-
-   **Do not enable `ingress`, `prometheus`, `metrics-server` or `cert-manager`.**
-   Each duplicates something this repo manages, and the duplicate is the one
-   that isn't in git. In particular `ingress` installs a second controller that
-   fights Traefik for :80/:443 and marks its own IngressClass default, leaving
-   two defaults — at which point any Ingress without an explicit `className` is
-   ambiguous. Always set `className: traefik` regardless.
-
-2. Install ArgoCD via Helm, using the same chart version and values this
+1. Install ArgoCD via Helm, using the same chart version and values this
    repo uses to manage ArgoCD afterwards:
 
    ```sh
-   microk8s helm3 repo add argo https://argoproj.github.io/argo-helm
-   microk8s helm3 repo update
+   helm repo add argo https://argoproj.github.io/argo-helm
+   helm repo update
 
-   microk8s helm3 install argocd argo/argo-cd \
+   helm install argocd argo/argo-cd \
      --version 10.6.4 \
      --namespace argocd --create-namespace \
      -f clusters/rpi-cluster/platform/argocd-values.yaml
    ```
 
-3. Apply the root Application so ArgoCD starts managing everything in this
+2. Apply the root Application so ArgoCD starts managing everything in this
    repo, including its own installation:
 
    ```sh
-   microk8s kubectl apply -f bootstrap/root-app.yaml
+   kubectl apply -f bootstrap/root-app.yaml
    ```
 
-4. Confirm all four Applications show up and sync — `argocd`, `traefik`,
-   `prometheus`, `resume`:
+3. Confirm the Applications show up and sync — `argocd`, `cilium`, `metallb`,
+   `envoy-gateway`, `prometheus`, `resume`:
 
    ```sh
-   microk8s kubectl get applications -n argocd
+   kubectl get applications -n argocd
    ```
 
    `prometheus` is the slow one: it installs the Prometheus Operator CRDs
    first, and on Pi hardware the whole stack can take several minutes to go
-   Healthy. `Progressing` is expected for a while.
+   Healthy. `Progressing` is expected for a while (and stays `Progressing`
+   until a StorageClass exists — Longhorn is not yet scaffolded, so Grafana's
+   and Prometheus's PVCs sit `Pending` for now, a known/accepted gap).
+
+   `cilium` syncs manually, not automatically — see
+   [`docs/architecture.md`](docs/architecture.md#adopting-an-already-running-release-cilium)
+   before touching it; it's adopting an already-running release, and an
+   unintended values change restarts the CNI on every node at once.
 
 From here, all changes - including upgrading ArgoCD itself - go through
 git: edit a manifest, commit, push, let ArgoCD sync.
@@ -80,7 +76,11 @@ git: edit a manifest, commit, push, let ArgoCD sync.
 ## What's scaffolded so far
 
 - **ArgoCD**, self-managed via the app-of-apps pattern.
-- **Traefik**, a DaemonSet binding hostPort 80/443 on every Pi.
+- **Cilium** — the cluster's CNI, adopted from the kubeadm bootstrap install.
+- **MetalLB** — L2-mode LoadBalancer IPs, pool `192.168.0.210`–`192.168.0.230`.
+- **Envoy Gateway** — Gateway API implementation fronting every hostname
+  through one shared LoadBalancer IP (replaced Traefik's per-node hostPort
+  model).
 - **kube-prometheus-stack** — Prometheus, Grafana, node-exporter and
   kube-state-metrics, tuned down for Pi hardware (Alertmanager off).
 - **`apps/resume`** — the resume site chart, and the reference chart for this
@@ -99,15 +99,17 @@ path.
    `apps/resume/values.yaml`, which is what triggers the ArgoCD rollout.
    - Make the GHCR package public, or add a pull secret and set
      `imagePullSecrets` in values — GHCR packages default to private.
-2. **Point DNS at a Pi.** `ingress.hosts[0].host` is `resume.lan`. Traefik runs
-   on every node with hostPort 80, so any node's IP works; an `/etc/hosts`
-   entry is enough to test.
+2. **Point DNS at the Gateway.** `route.hostnames[0]` is `resume.lan`. Unlike
+   Traefik's old hostPort DaemonSet, only ONE IP serves every hostname now —
+   find it with `kubectl get svc -n envoy-gateway-system` (an address in
+   `192.168.0.210`–`192.168.0.230`) and point an `/etc/hosts` entry or DNS
+   record at that, not at a node.
 3. **Check the two values that depend on cluster specifics.** Both defaults
-   assume a stock microk8s install and are usually right, but nothing enforces
-   them — a mismatch shows up as panels stuck on cached values, not an error:
+   are usually right for this cluster, but nothing enforces them — a mismatch
+   shows up as panels stuck on cached values, not an error:
    ```sh
-   microk8s kubectl get svc -n monitoring            # prometheus.proxy.url
-   microk8s kubectl get svc -n kube-system kube-dns  # prometheus.proxy.resolver
+   kubectl get svc -n monitoring            # prometheus.proxy.url
+   kubectl get svc -n kube-system kube-dns  # prometheus.proxy.resolver (10.96.0.10 on this cluster)
    ```
 
 Sync order mostly doesn't matter — the resume pod starts fine without
@@ -116,7 +118,8 @@ Prometheus and its panels fall back to cached values. The one failure mode that
 resolve) is deliberately avoided; see the comments in
 `apps/resume/templates/configmap.yaml`.
 
-Not yet scaffolded: cert-manager/TLS, MetalLB, and secrets management
-(SOPS/sealed-secrets). Add
-each as a new file under `clusters/rpi-cluster/platform/` following the
-pattern in `traefik.yaml`.
+Not yet scaffolded: cert-manager/TLS, persistent storage (Longhorn), and
+secrets management (External Secrets Operator + 1Password Connect). Add each
+as a new file under `clusters/rpi-cluster/platform/` following the pattern in
+`metallb.yaml` (or `envoy-gateway.yaml` if it also needs plain CR manifests
+alongside its chart — see `docs/architecture.md`).

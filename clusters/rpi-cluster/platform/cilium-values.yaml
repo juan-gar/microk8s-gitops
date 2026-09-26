@@ -1,0 +1,11 @@
+# Adopting the CNI that was installed by hand while bootstrapping the kubeadm
+# cluster (see the separate kubeadm rebuild guide, step 7). These are the
+# exact user-supplied values from that install - confirmed against the live
+# release with `helm get values cilium -n kube-system` before writing this
+# file. Do not add anything here without diffing it against the live release
+# first (see the adoption runbook in docs/architecture.md); an unintended
+# change to this file changes the cilium-config ConfigMap, which restarts
+# every agent DaemonSet pod cluster-wide.
+ipam:
+  mode: kubernetes
+kubeProxyReplacement: false

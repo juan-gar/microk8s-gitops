@@ -51,7 +51,7 @@ helm template resume apps/resume | ruby -ryaml -e \
 Against a live cluster, validate against the real API schemas:
 
 ```sh
-helm template resume apps/resume | microk8s kubectl apply --dry-run=server -f -
+helm template resume apps/resume | kubectl apply --dry-run=server -f -
 ```
 
 ## Concept map

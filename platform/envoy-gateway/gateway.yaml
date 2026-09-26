@@ -1,0 +1,19 @@
+# This Gateway's auto-created Service is type: LoadBalancer and draws an IP
+# from the MetalLB pool (192.168.0.210-192.168.0.230). Unlike Traefik's
+# per-node hostPort model, every hostname now resolves to this ONE shared IP
+# - check `kubectl get svc -n envoy-gateway-system` for the actual address,
+# nothing pins it to a specific one.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: eg
+  namespace: envoy-gateway-system
+spec:
+  gatewayClassName: eg
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: All
