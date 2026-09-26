@@ -8,10 +8,11 @@
 # the top-level platform/envoy-gateway/, not clusters/rpi-cluster/, for the
 # same directory.recurse reason documented in metallb.yaml.
 #
-# NOTE ON THE OCI SOURCE: verify `repoURL`/`chart` here against how ArgoCD
-# 10.6.4 actually resolves it on first sync (`kubectl describe application
-# envoy-gateway -n argocd` if it errors) - OCI Helm source syntax has shifted
-# across ArgoCD releases.
+# OCI SOURCE, confirmed empirically against this ArgoCD version (chart
+# 10.6.4 / argo-cd v3.5.2): a separate `chart:` field is NOT appended to the
+# OCI path - repoURL must be the full path including the chart name, or
+# ArgoCD queries the registry one path segment short and gets a 401 trying
+# to resolve a nonexistent "envoyproxy:1.9.1" image.
 #
 # No HTTPS listener yet - TLS needs cert-manager, which is deferred. Traefik
 # used to terminate :443 with a self-signed cert; resume.lan/grafana.lan lose
@@ -31,8 +32,7 @@ metadata:
 spec:
   project: default
   sources:
-    - repoURL: oci://docker.io/envoyproxy
-      chart: gateway-helm
+    - repoURL: oci://docker.io/envoyproxy/gateway-helm
       targetRevision: 1.9.1
       helm:
         releaseName: eg
