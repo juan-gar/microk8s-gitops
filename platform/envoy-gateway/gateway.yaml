@@ -1,5 +1,6 @@
 # This Gateway's auto-created Service is type: LoadBalancer and draws an IP
-# from the MetalLB pool (192.168.0.210-192.168.0.230). Unlike Traefik's
+# from Cilium's CiliumLoadBalancerIPPool (192.168.0.210-192.168.0.230,
+# see platform/cilium/). Unlike Traefik's
 # per-node hostPort model, every hostname now resolves to this ONE shared IP
 # - check `kubectl get svc -n envoy-gateway-system` for the actual address,
 # nothing pins it to a specific one.

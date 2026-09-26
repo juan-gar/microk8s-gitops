@@ -1,12 +1,20 @@
 # Cilium CNI, adopting the release installed by hand during the kubeadm
-# cluster bootstrap (see the kubeadm rebuild guide, step 7).
+# cluster bootstrap (see the kubeadm rebuild guide, step 7). Also now the
+# LoadBalancer IP allocator (enableLBIPAM, chart default) and L2 announcer
+# (l2announcements.enabled in cilium-values.yaml) for the cluster, replacing
+# MetalLB - see platform/cilium/ for the CRs. MetalLB's L2 speaker had a
+# confirmed bug (probed for the IP correctly, never sent the actual ARP
+# reply - proven by packet capture and by isolating it from a real
+# network/Cilium issue via a manual `ip addr add`), so this cluster moved
+# the whole L2/IPAM job to Cilium's own datapath instead.
 #
 # syncPolicy is deliberately MANUAL, unlike every other Application here.
-# This is an adoption, not a fresh install: the risk is values drift, not
-# resource identity. If cilium-values.yaml doesn't exactly match what's
-# already live, the cilium-config ConfigMap changes and every agent
-# DaemonSet pod on all 3 nodes restarts at once - a cluster-wide networking
-# blip, not a "just re-sync it" situation.
+# The original reason was adoption-values-drift risk (matching an
+# already-running release exactly, so a mismatch doesn't restart every
+# agent unexpectedly). Any DELIBERATE change here - like enabling
+# l2announcements - legitimately does restart every agent (a real config
+# change, not drift), and should be synced by hand at a moment that's fine
+# with a brief networking blip, same as the original adoption.
 #
 # Adoption runbook, in order:
 #   1. helm get values cilium -n kube-system   (confirm cilium-values.yaml
@@ -38,6 +46,9 @@ spec:
     - repoURL: https://github.com/juan-gar/microk8s-gitops.git
       targetRevision: main
       ref: values
+    - repoURL: https://github.com/juan-gar/microk8s-gitops.git
+      targetRevision: main
+      path: platform/cilium
   destination:
     server: https://kubernetes.default.svc
     namespace: kube-system

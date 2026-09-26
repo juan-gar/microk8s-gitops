@@ -9,3 +9,14 @@
 ipam:
   mode: kubernetes
 kubeProxyReplacement: false
+
+# Replaces MetalLB, whose L2 speaker had a confirmed bug: it correctly
+# probed for the IP (duplicate-address detection) but never sent the actual
+# ARP reply to the client - proven by packet capture, and isolated from
+# Cilium/network issues by manually assigning the same IP to a node's eth0
+# directly (worked instantly). Cilium's own LB-IPAM (enableLBIPAM, already
+# the chart default) and L2 announcer replace MetalLB's IPAddressPool and
+# L2Advertisement - see platform/cilium/ for the CiliumLoadBalancerIPPool and
+# CiliumL2AnnouncementPolicy CRs.
+l2announcements:
+  enabled: true

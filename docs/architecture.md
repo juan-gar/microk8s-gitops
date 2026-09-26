@@ -22,9 +22,9 @@ ever synced — including the legacy `site/k8s.yaml`, which is superseded by
 
 `platform/<component>/` is the newer sibling to `apps/<name>/`: a place for
 plain Kubernetes manifests (not a Helm chart) that belong to a platform
-Application - CRs like MetalLB's `IPAddressPool` or Envoy Gateway's
-`Gateway`. It lives outside `clusters/rpi-cluster` for the same reason
-`apps/` does: the root Application's `directory.recurse: true` watches
+Application - CRs like Cilium's `CiliumLoadBalancerIPPool` or Envoy
+Gateway's `Gateway`. It lives outside `clusters/rpi-cluster` for the same
+reason `apps/` does: the root Application's `directory.recurse: true` watches
 `clusters/rpi-cluster` and would double-apply anything placed there directly.
 
 ## Pattern: app-of-apps
@@ -60,8 +60,7 @@ instead of fighting a differently-configured install.
 | Component | Source | Notes |
 | --- | --- | --- |
 | ArgoCD | `platform/argocd.yaml` | manages itself |
-| Cilium | `platform/cilium.yaml` | CNI; adopted from the kubeadm bootstrap install, manual sync until diff is confirmed empty |
-| MetalLB | `platform/metallb.yaml` + `platform/metallb/` | L2 mode, pool `192.168.0.210-192.168.0.230` |
+| Cilium | `platform/cilium.yaml` + `platform/cilium/` | CNI, LoadBalancer IPAM and L2 announcer; adopted from the kubeadm bootstrap install, manual sync until diff is confirmed empty |
 | Envoy Gateway | `platform/envoy-gateway.yaml` + `platform/envoy-gateway/` | Gateway API implementation; replaced Traefik |
 | kube-prometheus-stack | `platform/prometheus.yaml` | Prometheus + Grafana + node-exporter + kube-state-metrics; Alertmanager off |
 | resume site | `apps/resume.yaml` → `apps/resume/` | image built from `site/`; queries Prometheus through a same-origin proxy |
@@ -76,7 +75,7 @@ for now (see `cilium-values.yaml`).
 One `Gateway` (`platform/envoy-gateway/gateway.yaml`) serves every hostname,
 unlike Traefik's old per-node `hostPort` DaemonSet where any Pi's IP worked.
 The Gateway's auto-created Service is `type: LoadBalancer` and draws its
-single shared IP from the MetalLB pool - check
+single shared IP from Cilium's `CiliumLoadBalancerIPPool` (`platform/cilium/loadbalancer-ip-pool.yaml`) - check
 `kubectl get svc -n envoy-gateway-system` for the actual address; nothing
 pins it to a specific one in this pass. Point DNS/hosts at that IP, not at a
 node.
@@ -126,6 +125,30 @@ The runbook `platform/cilium.yaml` follows:
 
 This same pattern applies to adopting anything else already running unmanaged
 on the cluster.
+
+### LoadBalancer IPAM and L2 announcement (Cilium, not MetalLB)
+
+MetalLB was tried first (the standard bare-metal choice), but its L2 speaker
+had a confirmed bug: it correctly ran duplicate-address detection for a new
+LoadBalancer IP (visible in its logs as an ARP *request*, sourced from the
+node's own IP, asking who currently holds the address) but then never sent
+the actual ARP *reply* to a real client's query - proven with a `tcpdump` on
+the node's `eth0` showing the client's request arriving and nothing ever
+answering it. This was isolated from a Cilium or network problem by manually
+running `ip addr add <ip>/32 dev eth0` on the node and confirming the same
+IP became reachable instantly - so the network path, Cilium's eBPF datapath,
+and XDP were all fine; the defect was specifically in MetalLB's speaker.
+
+Cilium 1.20 has the same two features (`enableLBIPAM` - LoadBalancer IP
+allocation, chart default `true`; `l2announcements` - the ARP/NDP responder)
+built into the agent already running on every node, so there's no separate
+raw-socket process to have this class of bug. `platform/cilium/` holds the
+`CiliumLoadBalancerIPPool` (replaces MetalLB's `IPAddressPool`) and
+`CiliumL2AnnouncementPolicy` (replaces `L2Advertisement`), both restricted to
+`eth0` explicitly - MetalLB had created ARP responders on both `eth0` and
+Cilium's own `cilium_vxlan` interface, which was one candidate explanation
+for the bug, so this stays unambiguous even though Cilium's own L2 announcer
+is different code.
 
 ### Prometheus
 
@@ -189,14 +212,14 @@ See [`helm-workflow.md`](helm-workflow.md) for the local edit/verify loop.
 
 Add a new `Application` under `clusters/rpi-cluster/platform/`. For
 third-party components prefer an Application sourced directly from the
-upstream Helm chart repo, like `metallb.yaml` does, over vendoring the chart
-into this repo.
+upstream Helm chart repo, like `envoy-gateway.yaml` does, over vendoring the
+chart into this repo.
 
 If the component also needs plain CR manifests alongside its chart (an
 `IPAddressPool`, a `Gateway`, anything that isn't itself a Helm release), add
 a third source to the same Application pointing at
 `platform/<component>/` at the **top level of the repo** - see
-`metallb.yaml` or `envoy-gateway.yaml`. That path must NOT be under
+`cilium.yaml` or `envoy-gateway.yaml`. That path must NOT be under
 `clusters/rpi-cluster/`: the root Application's `directory.recurse: true`
 already watches that whole subtree, so a plain manifest placed there gets
 applied twice - once by `root`, once by the component's own Application - a

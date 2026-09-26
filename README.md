@@ -52,7 +52,7 @@ pointed at the cluster.
    kubectl apply -f bootstrap/root-app.yaml
    ```
 
-3. Confirm the Applications show up and sync — `argocd`, `cilium`, `metallb`,
+3. Confirm the Applications show up and sync — `argocd`, `cilium`,
    `envoy-gateway`, `prometheus`, `resume`:
 
    ```sh
@@ -67,8 +67,9 @@ pointed at the cluster.
 
    `cilium` syncs manually, not automatically — see
    [`docs/architecture.md`](docs/architecture.md#adopting-an-already-running-release-cilium)
-   before touching it; it's adopting an already-running release, and an
-   unintended values change restarts the CNI on every node at once.
+   before touching it; it's adopting an already-running release (and is also
+   the cluster's LoadBalancer IPAM and L2 announcer), and an unintended
+   values change restarts the CNI on every node at once.
 
 From here, all changes - including upgrading ArgoCD itself - go through
 git: edit a manifest, commit, push, let ArgoCD sync.
@@ -77,7 +78,9 @@ git: edit a manifest, commit, push, let ArgoCD sync.
 
 - **ArgoCD**, self-managed via the app-of-apps pattern.
 - **Cilium** — the cluster's CNI, adopted from the kubeadm bootstrap install.
-- **MetalLB** — L2-mode LoadBalancer IPs, pool `192.168.0.210`–`192.168.0.230`.
+  Also provides LoadBalancer IPAM and L2 (ARP) announcement, pool
+  `192.168.0.210`–`192.168.0.230` (MetalLB was tried first and dropped after
+  a confirmed bug in its L2 speaker — see `docs/architecture.md`).
 - **Envoy Gateway** — Gateway API implementation fronting every hostname
   through one shared LoadBalancer IP (replaced Traefik's per-node hostPort
   model).
@@ -121,5 +124,5 @@ resolve) is deliberately avoided; see the comments in
 Not yet scaffolded: cert-manager/TLS, persistent storage (Longhorn), and
 secrets management (External Secrets Operator + 1Password Connect). Add each
 as a new file under `clusters/rpi-cluster/platform/` following the pattern in
-`metallb.yaml` (or `envoy-gateway.yaml` if it also needs plain CR manifests
+`envoy-gateway.yaml` (or `cilium.yaml` if it also needs plain CR manifests
 alongside its chart — see `docs/architecture.md`).
