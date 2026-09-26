@@ -33,9 +33,15 @@ controller:
   resources:
     requests:
       cpu: 50m
-      memory: 128Mi
+      memory: 256Mi
+    # 512Mi was fine for the original argocd/traefik/prometheus/resume
+    # footprint, but OOMKilled repeatedly (exit 137, CrashLoopBackOff) once
+    # Cilium (~1850-line render), MetalLB and Envoy Gateway's CRD-heavy
+    # charts were all added at once - the controller holds all of this in
+    # memory to diff/apply. Bumped after confirming headroom on the Pis
+    # (kubectl describe node: ~46% of limits committed on a 3.7Gi node).
     limits:
-      memory: 512Mi
+      memory: 1Gi
 
 server:
   replicas: 1
