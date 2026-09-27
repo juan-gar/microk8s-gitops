@@ -9,6 +9,9 @@ cluster.
   map of which Helm concept is demonstrated in which file.
 - [`docs/rebuild.md`](docs/rebuild.md) — rebuilding the Pis from scratch: what
   to back up, hardware and HA decisions, and the verification checklist.
+- [`docs/cloudflare-1password-setup.md`](docs/cloudflare-1password-setup.md) —
+  the manual, outside-git steps in Cloudflare, Namecheap and 1Password that
+  public exposure and cert-manager depend on.
 
 ## Repo layout
 
