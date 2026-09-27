@@ -1,6 +1,14 @@
 # MetalLB values for a 3-node bare-metal Raspberry Pi cluster. Chart defaults
 # are sane for a simple L2 setup (no BGP/FRR needed on a single flat LAN), so
-# beyond trimming resources for Pi hardware there is one setting that matters.
+# beyond trimming resources for Pi hardware there are two settings that matter.
+
+# The chart bundles frr-k8s (a DaemonSet of 5 containers per node plus a
+# status-cleaner Deployment) as its BGP backend, on by default. L2/ARP mode is
+# built into the speaker itself and never touches it, so on a flat LAN with no
+# BGP router it is pure overhead. Re-enable only if BGP peering is ever added.
+frrk8s:
+  enabled: false
+
 speaker:
   # REQUIRED on this cluster. kubeadm labels every control-plane node
   # node.kubernetes.io/exclude-from-external-load-balancers, and the speaker
