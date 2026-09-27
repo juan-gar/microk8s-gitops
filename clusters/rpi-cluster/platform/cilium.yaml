@@ -45,6 +45,23 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: kube-system
+  # The chart generates these two Secrets' certificates afresh on every render
+  # (it labels them cilium.io/helm-template-non-idempotent), so they would
+  # show OutOfSync forever. ignoreDifferences hides that diff;
+  # RespectIgnoreDifferences stops a sync from overwriting the live certs with
+  # a new random set, which would rotate Cilium's CA.
+  ignoreDifferences:
+    - kind: Secret
+      name: cilium-ca
+      namespace: kube-system
+      jsonPointers:
+        - /data
+    - kind: Secret
+      name: hubble-server-certs
+      namespace: kube-system
+      jsonPointers:
+        - /data
   syncPolicy:
     syncOptions:
       - ServerSideApply=true
+      - RespectIgnoreDifferences=true

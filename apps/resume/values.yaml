@@ -61,9 +61,10 @@ service:
 # the nginx.conf in the ConfigMap.
 containerPort: 8080
 
-# -- Left in place, disabled, as a fallback: this is what fronted the site
-# before the move to Gateway API/Envoy Gateway. Flip `enabled: true` and
-# disable `route` below to roll back.
+# -- Left in place, disabled, as a worked example of an Ingress template: this
+# is what fronted the site (via Traefik) before the move to Gateway API/Envoy
+# Gateway. Traefik has since been removed, so no Ingress controller runs on
+# the cluster - enabling this creates an Ingress that nothing serves.
 ingress:
   enabled: false
   className: traefik
