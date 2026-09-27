@@ -61,9 +61,7 @@ pointed at the cluster.
 
    `prometheus` is the slow one: it installs the Prometheus Operator CRDs
    first, and on Pi hardware the whole stack can take several minutes to go
-   Healthy. `Progressing` is expected for a while (and stays `Progressing`
-   until a StorageClass exists — Longhorn is not yet scaffolded, so Grafana's
-   and Prometheus's PVCs sit `Pending` for now, a known/accepted gap).
+   Healthy. `Progressing` is expected for a while.
 
    `cilium` syncs manually, not automatically — see
    [`docs/architecture.md`](docs/architecture.md#adopting-an-already-running-release-cilium)
@@ -84,6 +82,9 @@ git: edit a manifest, commit, push, let ArgoCD sync.
 - **Envoy Gateway** — Gateway API implementation fronting every hostname
   through one shared LoadBalancer IP (replaced Traefik's per-node hostPort
   model).
+- **local-path-provisioner** — dynamic `local-path` StorageClass, not
+  replicated (a PVC's data lives on whichever node it lands on). A stopgap
+  for Longhorn — see `docs/architecture.md`.
 - **kube-prometheus-stack** — Prometheus, Grafana, node-exporter and
   kube-state-metrics, tuned down for Pi hardware (Alertmanager off).
 - **`apps/resume`** — the resume site chart, and the reference chart for this
@@ -121,8 +122,10 @@ Prometheus and its panels fall back to cached values. The one failure mode that
 resolve) is deliberately avoided; see the comments in
 `apps/resume/templates/configmap.yaml`.
 
-Not yet scaffolded: cert-manager/TLS, persistent storage (Longhorn), and
-secrets management (External Secrets Operator + 1Password Connect). Add each
+Not yet scaffolded: cert-manager/TLS, replicated storage (Longhorn - see
+`docs/architecture.md` for why `local-path-provisioner` is standing in for
+it), and secrets management (External Secrets Operator + 1Password Connect).
+Add each
 as a new file under `clusters/rpi-cluster/platform/` following the pattern in
 `envoy-gateway.yaml` (or `cilium.yaml` if it also needs plain CR manifests
 alongside its chart — see `docs/architecture.md`).

@@ -1,0 +1,51 @@
+# Dynamic hostPath storage - unblocks Prometheus/Grafana, which had no
+# StorageClass to bind to at all since the kubeadm rebuild (their old
+# "microk8s-hostpath" reference doesn't exist on this cluster).
+#
+# Deliberately NOT Longhorn. Longhorn is the architecturally "correct" choice
+# already anticipated by the kubeadm guide (its OS-prep step already
+# installed open-iscsi/nfs-common for it) - real replicated storage, survives
+# a node failure. But it's a much bigger lift (its own manager/engine/replica
+# pods on every node, longer to stabilize on Pi hardware), and this cluster
+# needed *a* working StorageClass now, not eventually. local-path-provisioner
+# is a single small pod and gets there today.
+#
+# Trade-off, and the reason this isn't "done, forget it": a PVC's data lives
+# on whichever ONE node it happened to land on (WaitForFirstConsumer). If
+# that node goes down, that PVC's data is unavailable until it's back - no
+# replication at all. Acceptable for Prometheus/Grafana (metrics history and
+# dashboards aren't irreplaceable), not something to build on for anything
+# that needs real HA storage. Swapping to Longhorn later only means changing
+# storageClassName in each consumer's values - nothing else here changes.
+#
+# No published Helm repo for this chart - sourced directly from its chart
+# path in the upstream git repo, which ArgoCD supports the same as a
+# packaged repo.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: local-path-provisioner
+  namespace: argocd
+spec:
+  project: default
+  sources:
+    - repoURL: https://github.com/rancher/local-path-provisioner.git
+      path: deploy/chart/local-path-provisioner
+      targetRevision: v0.0.37
+      helm:
+        releaseName: local-path-provisioner
+        valueFiles:
+          - $values/clusters/rpi-cluster/platform/local-path-provisioner-values.yaml
+    - repoURL: https://github.com/juan-gar/microk8s-gitops.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: local-path-storage
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

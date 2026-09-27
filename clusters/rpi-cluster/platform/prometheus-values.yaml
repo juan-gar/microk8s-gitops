@@ -69,7 +69,11 @@ grafana:
   persistence:
     enabled: true
     type: sts
-    storageClassName: microk8s-hostpath
+    # local-path-provisioner (platform/local-path-provisioner.yaml) - not
+    # replicated, pins this pod to whichever node the volume lands on. Fine
+    # for Grafana's own dashboards/users; swap for Longhorn's StorageClass
+    # here (nothing else needs to change) once that lands.
+    storageClassName: local-path
     accessModes:
       - ReadWriteOnce
     size: 2Gi
@@ -143,14 +147,16 @@ prometheus:
     podMonitorSelectorNilUsesHelmValues: false
     ruleSelectorNilUsesHelmValues: false
 
-    # Persist across restarts using the microk8s hostpath provisioner
-    # (`microk8s enable hostpath-storage`). Note hostpath pins the pod to
+    # Persist across restarts using local-path-provisioner
+    # (platform/local-path-provisioner.yaml). Note this pins the pod to
     # whichever node the volume landed on - acceptable for a single
     # Prometheus, not something to copy for a workload you want rescheduled.
+    # Swap for Longhorn's StorageClass here once that lands; nothing else
+    # in this file needs to change.
     storageSpec:
       volumeClaimTemplate:
         spec:
-          storageClassName: microk8s-hostpath
+          storageClassName: local-path
           accessModes:
             - ReadWriteOnce
           resources:

@@ -62,6 +62,7 @@ instead of fighting a differently-configured install.
 | ArgoCD | `platform/argocd.yaml` | manages itself |
 | Cilium | `platform/cilium.yaml` + `platform/cilium/` | CNI, LoadBalancer IPAM and L2 announcer; adopted from the kubeadm bootstrap install, manual sync until diff is confirmed empty |
 | Envoy Gateway | `platform/envoy-gateway.yaml` + `platform/envoy-gateway/` | Gateway API implementation; replaced Traefik |
+| local-path-provisioner | `platform/local-path-provisioner.yaml` | dynamic, non-replicated `local-path` StorageClass; stopgap for Longhorn |
 | kube-prometheus-stack | `platform/prometheus.yaml` | Prometheus + Grafana + node-exporter + kube-state-metrics; Alertmanager off |
 | resume site | `apps/resume.yaml` → `apps/resume/` | image built from `site/`; queries Prometheus through a same-origin proxy |
 
@@ -149,6 +150,33 @@ raw-socket process to have this class of bug. `platform/cilium/` holds the
 Cilium's own `cilium_vxlan` interface, which was one candidate explanation
 for the bug, so this stays unambiguous even though Cilium's own L2 announcer
 is different code.
+
+### Storage: local-path-provisioner, not Longhorn (yet)
+
+The kubeadm rebuild left the cluster with no StorageClass at all - not
+"the old one doesn't work," genuinely none - which the Prometheus Operator
+treats as fatal rather than leaving the pod `Pending`:
+`sync "monitoring/prometheus-kube-prometheus-prometheus" failed: storage
+class "microk8s-hostpath" does not exist`. No Prometheus server ran at all
+until this was fixed.
+
+Longhorn is the architecturally "correct" fix - real replicated storage
+across all 3 nodes, already anticipated by the kubeadm guide's OS-prep step
+(`open-iscsi`/`nfs-common` are already installed for it) - but it's a bigger
+lift than "get something working now" called for. `local-path-provisioner`
+is a single small pod that creates the `local-path` StorageClass immediately,
+sourced directly from its chart in the upstream git repo (no published Helm
+repo exists for it, but ArgoCD supports a chart path in any git repo the same
+as a packaged one).
+
+The trade-off is real, not swept under the rug: a PVC's data lives on
+whichever one node it happened to land on (`volumeBindingMode:
+WaitForFirstConsumer`), with zero replication. If that node goes down, that
+PVC's data is unavailable until it's back. Acceptable for Prometheus/Grafana
+- metrics history and dashboards aren't irreplaceable - not something to
+build anything requiring real HA storage on top of. Swapping to Longhorn
+later is a one-line change per consumer (`storageClassName: local-path` →
+whatever Longhorn's class is named), nothing else here changes.
 
 ### Prometheus
 

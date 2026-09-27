@@ -1,0 +1,23 @@
+# Chart defaults already do what this cluster needs: creates the "local-path"
+# StorageClass (WaitForFirstConsumer, reclaimPolicy Delete), provisions under
+# /opt/local-path-provisioner on whichever node a pod lands on (that's on the
+# USB SSD boot disk, not an SD card - see the kubeadm rebuild guide's storage
+# decision). Not left as the cluster's default StorageClass on purpose: this
+# repo's convention is to set storageClassName explicitly everywhere (same
+# reasoning as always setting ingressClassName explicitly - see
+# docs/architecture.md), and an implicit default StorageClass is one more
+# thing to fight over once Longhorn eventually replaces this.
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 96Mi
+
+helperPod:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 32Mi
