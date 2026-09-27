@@ -36,7 +36,7 @@ spec:
         releaseName: local-path-provisioner
         valueFiles:
           - $values/clusters/rpi-cluster/platform/local-path-provisioner-values.yaml
-    - repoURL: https://github.com/juan-gar/microk8s-gitops.git
+    - repoURL: https://github.com/juan-gar/pi-cluster-gitops.git
       targetRevision: main
       ref: values
   destination:

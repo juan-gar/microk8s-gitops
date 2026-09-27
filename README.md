@@ -1,4 +1,4 @@
-# microk8s-gitops
+# pi-cluster-gitops
 
 GitOps source of truth for ArgoCD running on a 3-node Raspberry Pi kubeadm
 cluster.
