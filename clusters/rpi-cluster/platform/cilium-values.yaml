@@ -10,13 +10,9 @@ ipam:
   mode: kubernetes
 kubeProxyReplacement: false
 
-# Replaces MetalLB, whose L2 speaker had a confirmed bug: it correctly
-# probed for the IP (duplicate-address detection) but never sent the actual
-# ARP reply to the client - proven by packet capture, and isolated from
-# Cilium/network issues by manually assigning the same IP to a node's eth0
-# directly (worked instantly). Cilium's own LB-IPAM (enableLBIPAM, already
-# the chart default) and L2 announcer replace MetalLB's IPAddressPool and
-# L2Advertisement - see platform/cilium/ for the CiliumLoadBalancerIPPool and
-# CiliumL2AnnouncementPolicy CRs.
-l2announcements:
-  enabled: true
+# LoadBalancer IPs are MetalLB's job, not Cilium's (see metallb.yaml). Cilium
+# ships its own LB-IPAM and it is on by default; `none` makes it ignore
+# LoadBalancer Services with no loadBalancerClass, so the two can never both
+# claim or announce the same address. l2announcements is left at its chart
+# default (off) for the same reason.
+defaultLBServiceIPAM: none
