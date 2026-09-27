@@ -1,8 +1,12 @@
 # pi-cluster-gitops
 
-GitOps source of truth for ArgoCD running on a 3-node Raspberry Pi kubeadm
-cluster.
+Everything for a 3-node Raspberry Pi Kubernetes cluster: how the cluster
+itself is built (kubeadm, from bare Pis) and the GitOps source of truth
+ArgoCD syncs onto it once it's up.
 
+- [`docs/kubeadm-install-guide.md`](docs/kubeadm-install-guide.md) — building
+  the cluster from bare Pis: kubeadm, stacked etcd, kube-vip, Cilium. Start
+  here if there is no cluster yet; `scripts/` holds the per-node prep it uses.
 - [`docs/architecture.md`](docs/architecture.md) — repo layout, how to add apps
   and platform components.
 - [`docs/helm-workflow.md`](docs/helm-workflow.md) — the local Helm loop, and a
@@ -17,23 +21,30 @@ cluster.
 
 ```
 bootstrap/                       one-time, manually-applied root Application
-clusters/rpi-cluster/platform/   cluster infrastructure (ArgoCD, Traefik, Prometheus)
+clusters/rpi-cluster/platform/   cluster infrastructure Applications
 clusters/rpi-cluster/apps/       workload Applications
 apps/                            the Helm chart backing each workload
+platform/<component>/            plain CR manifests belonging to a platform Application
+scripts/                         per-node OS prep, run before kubeadm (see the install guide)
 site/                            source for the resume site image (built by CI)
+docs/                            install guide, architecture, external setup
 .github/workflows/               multi-arch image build + digest write-back
 ```
 
+Only `clusters/rpi-cluster` is watched by ArgoCD's root Application —
+everything else here is either referenced explicitly by an Application
+(`apps/`, `platform/`) or not deployed at all (`scripts/`, `docs/`, `site/`).
+
 ## Bootstrapping a fresh cluster
 
-Assumes kubeadm is installed and running on all three Pis (see the separate
-kubeadm rebuild guide for OS/cluster-formation steps), with `kubectl`/`helm`
-pointed at the cluster.
+Assumes kubeadm is installed and running on all three Pis — see
+[`docs/kubeadm-install-guide.md`](docs/kubeadm-install-guide.md) for that —
+with `kubectl`/`helm` pointed at the cluster.
 
-> Rebuilding the Pis from scratch? Follow [`docs/rebuild.md`](docs/rebuild.md)
-> first for what to back up and the hardware decisions that must be made
-> before install; OS/cluster formation itself now follows the separate
-> kubeadm guide, not this file.
+> Rebuilding existing Pis rather than starting fresh? Read
+> [`docs/rebuild.md`](docs/rebuild.md) first for what to back up and the
+> hardware decisions to make before wiping; OS and cluster formation then
+> follow the install guide, not this file.
 
 1. Install ArgoCD via Helm, using the same chart version and values this
    repo uses to manage ArgoCD afterwards:

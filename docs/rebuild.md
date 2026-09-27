@@ -2,8 +2,9 @@
 
 > **This file predates the move from microk8s to kubeadm.** Steps 2 and 4
 > below (hardware/HA decisions, OS install and cluster formation) are
-> superseded by the separate kubeadm rebuild guide — follow that for
-> everything up through a working cluster. Steps 1 (what to back up), 3
+> superseded by [`kubeadm-install-guide.md`](kubeadm-install-guide.md) —
+> follow that for everything up through a working cluster. Steps 1 (what to
+> back up), 3
 > (what's not coming back), 5's bootstrap command, and "Lessons the first
 > cluster taught" are still accurate and kept here.
 
