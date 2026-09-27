@@ -7,6 +7,12 @@ ArgoCD syncs onto it once it's up.
 - [`docs/kubeadm-install-guide.md`](docs/kubeadm-install-guide.md) — building
   the cluster from bare Pis: kubeadm, stacked etcd, kube-vip, Cilium. Start
   here if there is no cluster yet; `scripts/` holds the per-node prep it uses.
+- [`docs/networking-explained.md`](docs/networking-explained.md) — beginner's
+  guide to how a request reaches an app: MetalLB, Envoy Gateway and Cilium,
+  with analogies.
+- [`docs/public-access-explained.md`](docs/public-access-explained.md) —
+  beginner's guide to the planned public path: Namecheap, Cloudflare DNS, the
+  tunnel and its route, and where secrets and certificates fit.
 - [`docs/architecture.md`](docs/architecture.md) — repo layout, how to add apps
   and platform components.
 - [`docs/helm-workflow.md`](docs/helm-workflow.md) — the local Helm loop, and a

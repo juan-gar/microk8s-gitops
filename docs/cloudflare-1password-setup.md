@@ -1,7 +1,9 @@
 # External setup: Cloudflare, Namecheap, 1Password
 
 The manual, outside-git steps needed before the cluster side of public
-exposure (`juangar.com`) and cert-manager DNS-01 can work. Everything here
+exposure (`juangar.com`) and cert-manager DNS-01 can work. For what each
+piece is and why it's needed, read
+[`public-access-explained.md`](public-access-explained.md) first. Everything here
 happens in someone else's dashboard — nothing in this repo can create it, and
 nothing in this repo will detect it drifting.
 
@@ -199,7 +201,7 @@ sudo tee -a /etc/hosts <<'EOF'
 EOF
 ```
 
-`192.168.0.210` is the Envoy Gateway LoadBalancer IP from Cilium's pool. If
+`192.168.0.210` is the Envoy Gateway LoadBalancer IP from MetalLB's pool. If
 you run Pi-hole or another LAN resolver, put the records there instead so
 every device on the network gets them rather than just this machine.
 
