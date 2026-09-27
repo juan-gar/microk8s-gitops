@@ -67,7 +67,7 @@ with `kubectl`/`helm` pointed at the cluster.
    ```
 
 3. Confirm the Applications show up and sync — `argocd`, `cilium`,
-   `envoy-gateway`, `prometheus`, `resume`:
+   `metallb`, `envoy-gateway`, `prometheus`, `resume`:
 
    ```sh
    kubectl get applications -n argocd
@@ -79,8 +79,7 @@ with `kubectl`/`helm` pointed at the cluster.
 
    `cilium` syncs manually, not automatically — see
    [`docs/architecture.md`](docs/architecture.md#adopting-an-already-running-release-cilium)
-   before touching it; it's adopting an already-running release (and is also
-   the cluster's LoadBalancer IPAM and L2 announcer), and an unintended
+   before touching it; it's adopting an already-running release, and an unintended
    values change restarts the CNI on every node at once.
 
 From here, all changes - including upgrading ArgoCD itself - go through
@@ -90,9 +89,9 @@ git: edit a manifest, commit, push, let ArgoCD sync.
 
 - **ArgoCD**, self-managed via the app-of-apps pattern.
 - **Cilium** — the cluster's CNI, adopted from the kubeadm bootstrap install.
-  Also provides LoadBalancer IPAM and L2 (ARP) announcement, pool
-  `192.168.0.210`–`192.168.0.230` (MetalLB was tried first and dropped after
-  a confirmed bug in its L2 speaker — see `docs/architecture.md`).
+- **MetalLB** — LoadBalancer IPs in L2 mode, pool
+  `192.168.0.210`–`192.168.0.230`. Needs `ignoreExcludeLB: true` because
+  every node is a kubeadm control-plane node — see `docs/architecture.md`.
 - **Envoy Gateway** — Gateway API implementation fronting every hostname
   through one shared LoadBalancer IP (replaced Traefik's per-node hostPort
   model).

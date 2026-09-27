@@ -12,7 +12,7 @@ Everything in `control-plane` comes back on its own; these do not, because they 
 - [ ] Longhorn volume data you care about (Grafana state not in git, Ollama models if you don't want to re-pull, anything else stateful). Back up to the Synology NFS target or copy out with `kubectl cp`.
 - [ ] Any other hand-applied Secret: `kubectl get secrets -A` and check which ones ESO didn't create.
 - [ ] If Pi-hole runs on this cluster, move LAN DNS to the Synology or the router for the rebuild window, otherwise the nodes lose name resolution mid-install.
-- [ ] Note the current LoadBalancer IP pool range (now Cilium's `CiliumLoadBalancerIPPool`, `192.168.0.210`–`.230`); the new API server VIP must sit outside it and outside the DHCP range.
+- [ ] Note the current LoadBalancer IP pool range (MetalLB's `IPAddressPool`, `192.168.0.210`–`.230`); the new API server VIP must sit outside it and outside the DHCP range.
 
 ## 2. Design decisions
 
@@ -178,7 +178,7 @@ chmod +x kubectl && mv kubectl ~/bin/kubectl-1.35   # then alias k=kubectl-1.35,
 
 Pick the API server VIP: an unused LAN IP outside both the DHCP range and the LoadBalancer pool. Router's DHCP pool is confirmed as `192.168.0.33`–`192.168.0.199`, so `192.168.0.200` is used below. `192.168.0.210`–`192.168.0.230` is reserved for the cluster's LoadBalancer IP pool, so it never collides with the VIP.
 
-That pool is served by **Cilium's own LB-IPAM and L2 announcer**, not MetalLB. MetalLB was tried first and dropped: its L2 speaker correctly ran duplicate-address detection for a new LoadBalancer IP but never sent the actual ARP reply to clients — confirmed by packet capture, and isolated from any network/Cilium fault by manually assigning the same IP to a node's `eth0` (instantly reachable). Cilium does both jobs from the agent already running on every node. See [`architecture.md`](architecture.md).
+That pool is served by **MetalLB** in L2 mode. Because kubeadm labels every control-plane node `node.kubernetes.io/exclude-from-external-load-balancers`, and all three nodes here are control-plane, MetalLB's speaker needs `ignoreExcludeLB: true` or it silently answers ARP from no node at all. See [`architecture.md`](architecture.md#loadbalancer-ips-metallb-l2-mode).
 
 **kube-vip static pod.** It has to exist before `kubeadm init`, because init talks to the API server through the VIP.
 
@@ -200,7 +200,7 @@ sudo sed -i 's#path: /etc/kubernetes/admin.conf#path: /etc/kubernetes/super-admi
   /etc/kubernetes/manifests/kube-vip.yaml
 ```
 
-No `--services` flag: kube-vip handles only the API server VIP. LoadBalancer Services are owned by Cilium's LB-IPAM + L2 announcer (see the note above).
+No `--services` flag: kube-vip handles only the API server VIP. LoadBalancer Services are owned by MetalLB (see the note above).
 
 **kubeadm config file.** A config file instead of flags is what you'd version in git, and it's the only place some settings live. Unlike `kube-vip.yaml`, this file is **not** a static pod manifest and does **not** go in `/etc/kubernetes/manifests/` — it's just an input file for the `kubeadm init` command below, so it can live anywhere convenient, e.g. your home directory on node01 (`~/kubeadm-config.yaml`). Create it with:
 
@@ -405,7 +405,7 @@ Order matters because of bootstrap dependencies:
 
 Checks specific to this rebuild:
 
-- **LoadBalancer pool vs VIP.** Cilium's `CiliumLoadBalancerIPPool` must exclude the kube-vip address. Two things answering ARP for one IP produce intermittent API timeouts that look like network flakiness.
+- **LoadBalancer pool vs VIP.** MetalLB's `IPAddressPool` must exclude the kube-vip address. Two things answering ARP for one IP produce intermittent API timeouts that look like network flakiness.
 - **ArgoCD controller memory.** The default 512Mi limit OOMKills (exit 137, CrashLoopBackOff) once Cilium, Envoy Gateway and the Prometheus stack are all being diffed — it holds every rendered manifest in memory. 1Gi was needed here. The symptom is misleading: every Application appears stuck mid-sync rather than pointing at the controller.
 - **Storage.** Longhorn is *not* what ended up running — `local-path-provisioner` is, as a deliberate stopgap (single small pod, no replication, PVC data pinned to one node). If/when Longhorn does land, run `longhornctl check preflight` first; it catches missing iSCSI or a live multipathd from step 3. Note the Prometheus Operator treats a missing StorageClass as fatal and refuses to create the StatefulSet at all, rather than leaving a pod `Pending` — so "no Prometheus pod exists" is the symptom of a storage problem, not a Prometheus one.
 - **Ingress.** Upstream ingress-nginx was retired in March 2026 and gets no further security fixes. You're redeploying anyway, so this is the cheap moment to move to Gateway API, which is also on the CKA curriculum. With `kubeProxyReplacement=false`, Envoy Gateway is the straightforward pick; Cilium's own Gateway API implementation requires kube-proxy replacement enabled.

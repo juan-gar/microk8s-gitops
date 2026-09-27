@@ -1,0 +1,53 @@
+# MetalLB, the first thing on bare metal that hands out a real LAN IP to a
+# LoadBalancer Service - needed now that Envoy Gateway's Service wants one
+# (Traefik never did; it bound hostPort on every node instead).
+#
+# Three sources, chart + values ref + plain manifests:
+#   1. the upstream chart
+#   2. this repo, just for the values file (ref: values)
+#   3. this repo again, for the IPAddressPool/L2Advertisement manifests -
+#      note the path is `platform/metallb`, NOT
+#      `clusters/rpi-cluster/platform/metallb`. The root Application's
+#      `directory.recurse: true` already watches everything under
+#      `clusters/rpi-cluster`, so putting plain manifests there would make
+#      `root` apply them too - a shared-resource conflict with this
+#      Application. Plain (non-Application, non-chart) manifests live under
+#      the top-level `platform/` dir instead, same idea as `apps/resume/`
+#      living outside `clusters/rpi-cluster` for its chart.
+#
+# MetalLB's CRDs ship in the chart's own `crds` subchart, so CRD-then-CR
+# ordering within this one Application is automatic - no separate CRDs
+# Application needed.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: metallb
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  project: default
+  sources:
+    - repoURL: https://metallb.github.io/metallb
+      chart: metallb
+      targetRevision: 0.16.1
+      helm:
+        releaseName: metallb
+        valueFiles:
+          - $values/clusters/rpi-cluster/platform/metallb-values.yaml
+    - repoURL: https://github.com/juan-gar/pi-cluster-gitops.git
+      targetRevision: main
+      ref: values
+    - repoURL: https://github.com/juan-gar/pi-cluster-gitops.git
+      targetRevision: main
+      path: platform/metallb
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: metallb-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

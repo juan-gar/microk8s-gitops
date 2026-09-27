@@ -7,8 +7,8 @@
 # syncPolicy is deliberately MANUAL, unlike every other Application here.
 # The original reason was adoption-values-drift risk (matching an
 # already-running release exactly, so a mismatch doesn't restart every
-# agent unexpectedly). Any DELIBERATE change here - like enabling
-# l2announcements - legitimately does restart every agent (a real config
+# agent unexpectedly). Any DELIBERATE change here - like changing
+# defaultLBServiceIPAM - legitimately does restart every agent (a real config
 # change, not drift), and should be synced by hand at a moment that's fine
 # with a brief networking blip, same as the original adoption.
 #

@@ -22,7 +22,7 @@ ever synced — including the legacy `site/k8s.yaml`, which is superseded by
 
 `platform/<component>/` is the newer sibling to `apps/<name>/`: a place for
 plain Kubernetes manifests (not a Helm chart) that belong to a platform
-Application - CRs like Cilium's `CiliumLoadBalancerIPPool` or Envoy
+Application - CRs like MetalLB's `IPAddressPool` or Envoy
 Gateway's `Gateway`. It lives outside `clusters/rpi-cluster` for the same
 reason `apps/` does: the root Application's `directory.recurse: true` watches
 `clusters/rpi-cluster` and would double-apply anything placed there directly.
@@ -60,7 +60,8 @@ instead of fighting a differently-configured install.
 | Component | Source | Notes |
 | --- | --- | --- |
 | ArgoCD | `platform/argocd.yaml` | manages itself |
-| Cilium | `platform/cilium.yaml` + `platform/cilium/` | CNI, LoadBalancer IPAM and L2 announcer; adopted from the kubeadm bootstrap install, manual sync until diff is confirmed empty |
+| Cilium | `platform/cilium.yaml` | CNI only (its LB-IPAM is off); adopted from the kubeadm bootstrap install, manual sync until diff is confirmed empty |
+| MetalLB | `platform/metallb.yaml` + `platform/metallb/` | LoadBalancer IPs, L2/ARP mode; needs `ignoreExcludeLB` on this all-control-plane cluster |
 | Envoy Gateway | `platform/envoy-gateway.yaml` + `platform/envoy-gateway/` | Gateway API implementation; replaced Traefik |
 | local-path-provisioner | `platform/local-path-provisioner.yaml` | dynamic, non-replicated `local-path` StorageClass; stopgap for Longhorn |
 | kube-prometheus-stack | `platform/prometheus.yaml` | Prometheus + Grafana + node-exporter + kube-state-metrics; Alertmanager off |
@@ -76,7 +77,7 @@ for now (see `cilium-values.yaml`).
 One `Gateway` (`platform/envoy-gateway/gateway.yaml`) serves every hostname,
 unlike Traefik's old per-node `hostPort` DaemonSet where any Pi's IP worked.
 The Gateway's auto-created Service is `type: LoadBalancer` and draws its
-single shared IP from Cilium's `CiliumLoadBalancerIPPool` (`platform/cilium/loadbalancer-ip-pool.yaml`) - check
+single shared IP from the MetalLB pool (`platform/metallb/ipaddresspool.yaml`) - check
 `kubectl get svc -n envoy-gateway-system` for the actual address; nothing
 pins it to a specific one in this pass. Point DNS/hosts at that IP, not at a
 node.
@@ -127,29 +128,33 @@ The runbook `platform/cilium.yaml` follows:
 This same pattern applies to adopting anything else already running unmanaged
 on the cluster.
 
-### LoadBalancer IPAM and L2 announcement (Cilium, not MetalLB)
+### LoadBalancer IPs: MetalLB (L2 mode)
 
-MetalLB was tried first (the standard bare-metal choice), but its L2 speaker
-had a confirmed bug: it correctly ran duplicate-address detection for a new
-LoadBalancer IP (visible in its logs as an ARP *request*, sourced from the
-node's own IP, asking who currently holds the address) but then never sent
-the actual ARP *reply* to a real client's query - proven with a `tcpdump` on
-the node's `eth0` showing the client's request arriving and nothing ever
-answering it. This was isolated from a Cilium or network problem by manually
-running `ip addr add <ip>/32 dev eth0` on the node and confirming the same
-IP became reachable instantly - so the network path, Cilium's eBPF datapath,
-and XDP were all fine; the defect was specifically in MetalLB's speaker.
+MetalLB hands out LoadBalancer IPs from `192.168.0.210`–`192.168.0.230`
+(`platform/metallb/ipaddresspool.yaml`) and answers ARP for them from one
+node at a time (`platform/metallb/l2advertisement.yaml`, pinned to `eth0`).
+Chosen over Cilium's built-in equivalent because it doesn't depend on the
+CNI, so the same setup carries to any bare-metal cluster. Cilium's own
+LB-IPAM is switched off (`defaultLBServiceIPAM: none` in
+`cilium-values.yaml`) so the two can never claim the same address.
 
-Cilium 1.20 has the same two features (`enableLBIPAM` - LoadBalancer IP
-allocation, chart default `true`; `l2announcements` - the ARP/NDP responder)
-built into the agent already running on every node, so there's no separate
-raw-socket process to have this class of bug. `platform/cilium/` holds the
-`CiliumLoadBalancerIPPool` (replaces MetalLB's `IPAddressPool`) and
-`CiliumL2AnnouncementPolicy` (replaces `L2Advertisement`), both restricted to
-`eth0` explicitly - MetalLB had created ARP responders on both `eth0` and
-Cilium's own `cilium_vxlan` interface, which was one candidate explanation
-for the bug, so this stays unambiguous even though Cilium's own L2 announcer
-is different code.
+**`speaker.ignoreExcludeLB: true` is required here.** kubeadm labels every
+control-plane node `node.kubernetes.io/exclude-from-external-load-balancers`,
+and MetalLB's speaker won't announce from a labelled node. All three nodes
+here are control-plane, so without the flag a Service gets its
+`EXTERNAL-IP` and nothing on the LAN can reach it: no node answers ARP. In
+L2 mode that skip is logged only at debug level, so from the outside it
+looks like a speaker bug.
+
+That is exactly how it was misread the first time. A `tcpdump` on `eth0`
+showed client ARP requests arriving and no reply, and a manual
+`ip addr add <ip>/32 dev eth0` made the IP reachable instantly — which
+proved the network path fine but was wrongly taken as proof of a MetalLB
+defect. The cluster spent a day on Cilium's L2 announcer (commit `1141a89`,
+whose message repeats the wrong diagnosis) before the label was found. It's
+in MetalLB's troubleshooting docs under "MetalLB is not advertising my
+service from my control-plane nodes". If a node is ever added as a pure
+worker, it will not carry the label and needs nothing special.
 
 ### Storage: local-path-provisioner, not Longhorn (yet)
 

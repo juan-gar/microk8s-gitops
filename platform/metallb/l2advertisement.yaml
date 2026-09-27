@@ -1,0 +1,14 @@
+# Simple L2 mode (ARP), matching the flat single-LAN topology - no BGP/FRR
+# router config to maintain. Pinned to eth0: left unset, the speaker also
+# opens ARP responders on Cilium's cilium_vxlan tunnel interface, which no
+# LAN client will ever ask on.
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: lan-pool
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - lan-pool
+  interfaces:
+    - eth0
