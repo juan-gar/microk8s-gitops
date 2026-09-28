@@ -51,8 +51,11 @@ server:
       memory: 64Mi
     limits:
       memory: 256Mi
-  # ClusterIP for now; expose via an Ingress/MetalLB LoadBalancer once
-  # platform networking is scaffolded.
+  # Deliberately not exposed: reach the UI with
+  #   kubectl port-forward -n argocd svc/argocd-server 8080:443
+  # An HTTPRoute on the shared Gateway would work now, but ArgoCD's UI can
+  # change the whole cluster, so it stays off the network until there's a
+  # reason (and proper auth) to put it there.
   service:
     type: ClusterIP
 

@@ -1,8 +1,9 @@
 # Chart defaults already do what this cluster needs: creates the "local-path"
 # StorageClass (WaitForFirstConsumer, reclaimPolicy Delete), provisions under
-# /opt/local-path-provisioner on whichever node a pod lands on (that's on the
-# USB SSD boot disk, not an SD card - see the kubeadm rebuild guide's storage
-# decision). Not left as the cluster's default StorageClass on purpose: this
+# /opt/local-path-provisioner on whichever node a pod lands on. That is the
+# node's boot disk - currently a microSD card on all three Pis, not the USB
+# SSD the install guide recommends - so a write-heavy volume competes with
+# etcd for the same card (see the Grafana note in prometheus-values.yaml). Not left as the cluster's default StorageClass on purpose: this
 # repo's convention is to set storageClassName explicitly everywhere (same
 # reasoning as always setting ingressClassName explicitly - see
 # docs/architecture.md), and an implicit default StorageClass is one more

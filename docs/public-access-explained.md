@@ -359,8 +359,10 @@ recover on its own.
 
 ## Part 6 — Real certificates for LAN-only names (cert-manager)
 
-Separate from the public site, the plan also gives the LAN services real
-HTTPS: `resume.home.juangar.com` and `grafana.home.juangar.com`.
+Separate from the public site, the LAN services also get real HTTPS:
+`resume.home.juangar.com` and `grafana.home.juangar.com`, both live with
+Let's Encrypt certificates (first issued 2026-09-28, renewed automatically
+by cert-manager before they expire).
 
 **Why not `resume.lan`?** Public certificate authorities (like Let's
 Encrypt) only issue certificates for names someone provably owns. Nobody

@@ -65,15 +65,24 @@ with `kubectl`/`helm` pointed at the cluster.
      -f clusters/rpi-cluster/platform/argocd-values.yaml
    ```
 
-2. Apply the root Application so ArgoCD starts managing everything in this
+2. Create the two hand-made bootstrap Secrets (1Password Connect's
+   credentials file and the token ESO uses to reach it) — the only secrets
+   that can't come from 1Password, because they're what unlocks it. Commands
+   in [`docs/cloudflare-1password-setup.md`](docs/cloudflare-1password-setup.md),
+   step 7. Without them Connect, ESO and everything that gets a secret from
+   1Password (cloudflared, cert-manager's DNS-01) wait unhealthy.
+
+3. Apply the root Application so ArgoCD starts managing everything in this
    repo, including its own installation:
 
    ```sh
    kubectl apply -f bootstrap/root-app.yaml
    ```
 
-3. Confirm the Applications show up and sync — `argocd`, `cilium`,
-   `metallb`, `envoy-gateway`, `prometheus`, `resume`:
+4. Confirm the Applications show up and sync — twelve of them: `root`,
+   `argocd`, `cilium`, `metallb`, `envoy-gateway`, `local-path-provisioner`,
+   `prometheus`, `onepassword-connect`, `external-secrets-operator`,
+   `cert-manager`, `cloudflared`, `resume`:
 
    ```sh
    kubectl get applications -n argocd
@@ -122,27 +131,34 @@ The site reads live cluster state from Prometheus through a same-origin nginx
 proxy — see [`docs/architecture.md`](docs/architecture.md) for the request
 path.
 
-### Remaining steps before it serves
+### Where the site is served
 
-1. **Push the image once.** The chart points at `ghcr.io/juan-gar/resume-web`,
-   which doesn't exist until `.github/workflows/build-site.yml` runs. Push a
-   change under `site/`, or trigger the workflow manually. It builds
-   linux/arm64 (plus amd64) and writes the resulting digest back into
-   `apps/resume/values.yaml`, which is what triggers the ArgoCD rollout.
-   - Make the GHCR package public, or add a pull secret and set
-     `imagePullSecrets` in values — GHCR packages default to private.
-2. **Point DNS at the Gateway.** `route.hostnames[0]` is `resume.lan`. Unlike
-   Traefik's old hostPort DaemonSet, only ONE IP serves every hostname now —
-   find it with `kubectl get svc -n envoy-gateway-system` (an address in
-   `192.168.0.210`–`192.168.0.230`) and point an `/etc/hosts` entry or DNS
-   record at that, not at a node.
-3. **Check the two values that depend on cluster specifics.** Both defaults
-   are usually right for this cluster, but nothing enforces them — a mismatch
-   shows up as panels stuck on cached values, not an error:
+| Hostname | Reachable from | HTTPS | How |
+| --- | --- | --- | --- |
+| **https://juangar.com** | anywhere | Cloudflare's certificate | Cloudflare Tunnel → Envoy — [explained](docs/public-access-explained.md) |
+| `https://resume.home.juangar.com` | LAN | Let's Encrypt via cert-manager | Envoy's `https-resume` listener |
+| `http://resume.lan` | LAN | – | Envoy's `http` listener |
+
+The LAN names need an `/etc/hosts` entry (or a LAN DNS record) pointing at
+the Gateway's IP, `192.168.0.210` — one IP for every hostname, never a node's
+own IP. `grafana.lan` / `grafana.home.juangar.com` work the same way.
+
+### If the site doesn't come up on a fresh cluster
+
+1. **Image.** The chart pulls `ghcr.io/juan-gar/resume-web` by the digest
+   that `.github/workflows/build-site.yml` writes back into
+   `apps/resume/values.yaml` after each build of `site/`. The GHCR package
+   must be public (or add `imagePullSecrets`).
+2. **The two values that depend on cluster specifics.** Both defaults are
+   right for this cluster, but nothing enforces them — a mismatch shows up as
+   panels stuck on cached values, not an error:
    ```sh
    kubectl get svc -n monitoring            # prometheus.proxy.url
    kubectl get svc -n kube-system kube-dns  # prometheus.proxy.resolver (10.96.0.10 on this cluster)
    ```
+3. **Public path.** If `juangar.com` hangs or errors while the LAN names work,
+   see "What could break" in
+   [`docs/public-access-explained.md`](docs/public-access-explained.md).
 
 Sync order mostly doesn't matter — the resume pod starts fine without
 Prometheus and its panels fall back to cached values. The one failure mode that
@@ -154,5 +170,6 @@ Not yet scaffolded: replicated storage (Longhorn - see
 `docs/architecture.md` for why `local-path-provisioner` is standing in for
 it). Add new components
 as a new file under `clusters/rpi-cluster/platform/` following the pattern in
-`envoy-gateway.yaml` (or `cilium.yaml` if it also needs plain CR manifests
-alongside its chart — see `docs/architecture.md`).
+`envoy-gateway.yaml` or `cert-manager.yaml` (chart + values + a
+`platform/<component>/` folder of plain manifests) — see
+`docs/architecture.md`.

@@ -91,7 +91,9 @@ route:
   # (platform/envoy-gateway/gateway.yaml). Unlike Traefik's old hostPort
   # DaemonSet, every hostname now resolves to ONE shared LoadBalancer IP -
   # check `kubectl get svc -n envoy-gateway-system` for the actual address.
-  # No HTTPS listener yet; that needs cert-manager (not yet scaffolded).
+  # HTTPS for resume.home.juangar.com is the Gateway's https-resume listener
+  # (certificate from cert-manager); juangar.com's public HTTPS is terminated
+  # by Cloudflare and arrives through the tunnel on the http listener.
   enabled: true
   # One entry per Gateway listener this route should attach to. sectionName
   # pins it to a named listener; the HTTPS listener is hostname-specific

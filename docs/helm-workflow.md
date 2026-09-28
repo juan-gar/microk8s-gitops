@@ -75,9 +75,11 @@ Where each Helm idea lives in `apps/resume`, roughly in order of difficulty:
 | prefix-form comparisons (`gt`, `and`) | `templates/deployment.yaml` |
 | templating a config file | `templates/configmap.yaml` |
 | `range` over a map | `templates/configmap.yaml` |
+| `range` over a list (nginx `set_real_ip_from`) | `templates/configmap.yaml` |
 | multiple docs in one file | `templates/configmap.yaml` |
 | nested `range`, capturing variables | `templates/ingress.yaml` |
 | `.Capabilities` and its GitOps caveat | `templates/hpa.yaml` |
+| whole-file `if` with combined conditions (`and`/`or`) | `templates/pdb.yaml` |
 | schema validation | `values.schema.json` |
 | hooks and tests | `templates/tests/test-connection.yaml` |
 | post-install output | `templates/NOTES.txt` |
@@ -103,7 +105,13 @@ output, tracking the resources itself. So in this repo:
 
 - `helm list` shows nothing — there is no release secret in the cluster.
 - `NOTES.txt` and `helm test` never run in-cluster; they are for your local loop.
-- `helm.sh/hook` annotations are ignored — ArgoCD has its own hook annotations.
+- Helm hooks are **translated**, not ignored: `pre-install`/`pre-upgrade` run
+  as ArgoCD PreSync hooks and `post-install`/`post-upgrade` as PostSync, on
+  every full sync (not selective ones). Test hooks are unsupported and
+  skipped. With no delete policy ArgoCD assumes `BeforeHookCreation`, and it
+  never prunes a hook object the chart stops rendering. Seen in practice:
+  Envoy Gateway's certgen Job (PreSync), cert-manager's startupapicheck
+  (PostSync), 1Password Connect's test pod (skipped).
 - Rollback is `argocd app rollback` or a git revert, never `helm rollback`.
 
 This is worth internalising early, because most Helm documentation assumes the

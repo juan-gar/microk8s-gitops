@@ -3,10 +3,10 @@
 > **This file predates the move from microk8s to kubeadm.** Steps 2 and 4
 > below (hardware/HA decisions, OS install and cluster formation) are
 > superseded by [`kubeadm-install-guide.md`](kubeadm-install-guide.md) —
-> follow that for everything up through a working cluster. Steps 1 (what to
-> back up), 3
-> (what's not coming back), 5's bootstrap command, and "Lessons the first
-> cluster taught" are still accurate and kept here.
+> follow that for everything up through a working cluster. Step 1 (what to
+> back up, updated for kubeadm and `local-path`), step 3 (what's not coming
+> back), step 5's bootstrap pointer, step 6's checks and "Lessons the first
+> cluster taught" still apply and are kept here.
 
 Written after the first cluster accumulated two years of undocumented state —
 a hand-rolled Prometheus, IngressClasses with no controller behind them, addons
@@ -26,20 +26,26 @@ Inventory the live cluster first — you cannot ask it anything once it's gone:
 ```sh
 kubectl get pvc -A -o wide                       # what has persistent data
 kubectl get svc -A --field-selector spec.type=LoadBalancer   # which LAN IPs are in use
-kubectl get ingress -A                           # which hostnames are served
+kubectl get httproute -A                         # which hostnames are served
 kubectl get ns -o name                           # what's actually deployed
 ```
 
-Then copy the data off. hostpath volumes live on the node the PV is pinned to,
-under `/var/snap/microk8s/common/default-storage/`:
+Then copy the data off. `local-path` volumes live on the node the PV is
+pinned to, each in its own directory under `/opt/local-path-provisioner/`
+(named `<pv>_<namespace>_<claim>`):
 
 ```sh
 kubectl get pv -o custom-columns=\
-'PV:.metadata.name,CLAIM:.spec.claimRef.name,NODE:.spec.nodeAffinity.required.nodeSelectorTerms[0].matchExpressions[0].values[0]'
+'PV:.metadata.name,CLAIM:.spec.claimRef.name,NODE:.spec.nodeAffinity.required.nodeSelectorTerms[0].matchExpressions[0].values[0],PATH:.spec.hostPath.path'
 
 # then, on the node each PV is pinned to:
-sudo tar czf ~/pv-<claim>.tgz -C /var/snap/microk8s/common/default-storage <dir>
+sudo tar czf ~/pv-<claim>.tgz -C /opt/local-path-provisioner <directory from PATH>
 ```
+
+Also outside git, and not coming back on their own: the two 1Password
+bootstrap credentials (see the install guide's "Before you wipe"), and
+everything in Cloudflare's dashboard — DNS records and the tunnel's route
+(`docs/public-access-explained.md`, "What lives where").
 
 ### The one that will bite you
 
@@ -176,7 +182,7 @@ kubectl logs nettest; kubectl delete pod nettest
 ```
 
 Run the last one with the pod pinned to each node in turn
-(`--overrides='{"spec":{"nodeName":"worker1"}}'`). On the first cluster,
+(`--overrides='{"spec":{"nodeName":"node01"}}'`). On the first cluster,
 service networking was broken on exactly one node while every configuration
 file on it was byte-identical to a working node — a per-node check is the only
 thing that catches that.

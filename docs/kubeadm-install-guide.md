@@ -6,10 +6,10 @@ Rebuild the 3-node Raspberry Pi 4 cluster on kubeadm v1.35 with a highly availab
 
 ## 1. Before you wipe
 
-Everything in `control-plane` comes back on its own; these do not, because they live outside git.
+Everything in this repo comes back on its own once ArgoCD is running; these do not, because they live outside git.
 
 - [ ] 1Password Connect bootstrap: `1password-credentials.json` and the Connect access token. External Secrets Operator can't fetch anything until these exist as Secrets again.
-- [ ] Longhorn volume data you care about (Grafana state not in git, Ollama models if you don't want to re-pull, anything else stateful). Back up to the Synology NFS target or copy out with `kubectl cp`.
+- [ ] Persistent volume data you care about. Storage is `local-path` (not replicated): each volume is a directory under `/opt/local-path-provisioner/` on one node — today Grafana's on node03 (dashboards/users not in git) and Prometheus's metrics on node02. `kubectl get pv -o wide` shows which node holds what; `tar` the directory off that node, or accept the loss for metrics history.
 - [ ] Any other hand-applied Secret: `kubectl get secrets -A` and check which ones ESO didn't create.
 - [ ] If Pi-hole runs on this cluster, move LAN DNS to the Synology or the router for the rebuild window, otherwise the nodes lose name resolution mid-install.
 - [ ] Note the current LoadBalancer IP pool range (MetalLB's `IPAddressPool`, `192.168.0.210`–`.230`); the new API server VIP must sit outside it and outside the DHCP range.
@@ -26,11 +26,13 @@ Everything in `control-plane` comes back on its own; these do not, because they 
 | OS | Ubuntu Server 24.04 LTS arm64 | Standard kubeadm target; kernel 6.8 ships the vxlan and BPF features Cilium needs. |
 | Boot disk | USB 3 SSD, not microSD | etcd fsyncs on every write; SD card latency causes leader elections and API timeouts. |
 
-If 4 GB per node gets tight, the fallback is a single control plane on `node01` with two workers: same steps, but skip kube-vip and join nodes 2 and 3 without `--control-plane`. Budget roughly 600–800 MB per node for etcd plus the control-plane pods.
+> **Reality check (2026-09-28):** the cluster as built boots from **microSD** on all three Pis (59.5 GB cards, `mmcblk0`), not SSDs. Measured single 4 KB synchronous writes took ~8–13 ms — right at etcd's comfort limit — and one workload thrashing its card (Grafana at its memory limit, see `docs/architecture.md`) was enough to take a node `NotReady`. The SSD recommendation stands; it's the biggest reliability upgrade available here.
+
+If 4 GB per node gets tight, the fallback is a single control plane on `node01` with two workers: same steps, but skip kube-vip and join nodes 2 and 3 without `--control-plane`. The original budget of 600–800 MB per node for etcd plus the control-plane pods was optimistic: with the full GitOps stack installed, **kube-apiserver alone measured ~930–1000 MB per node**, leaving roughly 1–1.5 GB available per Pi. There's no swap, so a spike has nowhere to go.
 
 ## 3. Prepare the OS (all three nodes)
 
-Flash Ubuntu Server 24.04 LTS (64-bit) onto each SSD with Raspberry Pi Imager, setting hostname (`node01`–`node03`), user and SSH key in the imager's settings. A Pi 4 boots from USB once its bootloader EEPROM is current. Give each node a DHCP reservation on the router so these stay put.
+Flash Ubuntu Server 24.04 LTS (64-bit) onto each SSD (the current nodes use microSD — see the reality check above) with Raspberry Pi Imager, setting hostname (`node01`–`node03`), user and SSH key in the imager's settings. A Pi 4 boots from USB once its bootloader EEPROM is current. Give each node a DHCP reservation on the router so these stay put.
 
 Actual LAN is `192.168.0.0/24` (not `192.168.1.0/24` as originally drafted). Node IPs, DHCP-reserved by MAC on the router and confirmed stable as of 2026-09-26:
 
@@ -285,7 +287,7 @@ kubectl get nodes    # node01 Ready, coredns Running
 
 `kubeProxyReplacement=false` keeps kube-proxy in the datapath for now. Turn it on only after you've studied what it replaces, in line with the manual-first approach.
 
-Once ArgoCD is running (step 10), adopt this release as an Application with the same chart version and values, so the CNI is declared in `control-plane` like everything else.
+Once ArgoCD is running (step 10), adopt this release as an Application with the same chart version and values, so the CNI is declared in this repo like everything else (`clusters/rpi-cluster/platform/cilium.yaml`).
 
 ## 8. Join node02 and node03 as control planes
 
@@ -399,7 +401,7 @@ Restoring uses `etcdutl snapshot restore`; the `etcdctl` restore subcommand is g
 Order matters because of bootstrap dependencies:
 
 1. Recreate the hand-held Secrets from step 1 (1Password Connect credentials and token). Everything else comes from 1Password through ESO.
-2. Install ArgoCD with Helm, then apply the app-of-apps root Application from `control-plane`.
+2. Install ArgoCD with Helm, then apply the app-of-apps root Application from this repo (`bootstrap/root-app.yaml` — see the README's "Bootstrapping a fresh cluster").
 3. Let ArgoCD sync the rest. Make sure CRD-providing apps (cert-manager, ESO, Envoy Gateway) land before the resources that use them. Note: sync-wave annotations on a *manually-synced* Application will stall the root app's whole sync waiting for it to go healthy — that happened with Cilium during this rebuild. Prefer bundling each component's CRs into its own Application (multi-source) over cross-Application wave ordering.
 4. Adopt Cilium as an Application (step 7).
 
@@ -409,7 +411,9 @@ Checks specific to this rebuild:
 - **ArgoCD controller memory.** The default 512Mi limit OOMKills (exit 137, CrashLoopBackOff) once Cilium, Envoy Gateway and the Prometheus stack are all being diffed — it holds every rendered manifest in memory. 1Gi was needed here. The symptom is misleading: every Application appears stuck mid-sync rather than pointing at the controller.
 - **Storage.** Longhorn is *not* what ended up running — `local-path-provisioner` is, as a deliberate stopgap (single small pod, no replication, PVC data pinned to one node). If/when Longhorn does land, run `longhornctl check preflight` first; it catches missing iSCSI or a live multipathd from step 3. Note the Prometheus Operator treats a missing StorageClass as fatal and refuses to create the StatefulSet at all, rather than leaving a pod `Pending` — so "no Prometheus pod exists" is the symptom of a storage problem, not a Prometheus one.
 - **Ingress.** Upstream ingress-nginx was retired in March 2026 and gets no further security fixes. You're redeploying anyway, so this is the cheap moment to move to Gateway API, which is also on the CKA curriculum. With `kubeProxyReplacement=false`, Envoy Gateway is the straightforward pick; Cilium's own Gateway API implementation requires kube-proxy replacement enabled.
-- **DNS.** Re-point Pi-hole records and the Cloudflare DNS-01 setup if any node or LoadBalancer IP changed.
+- **Grafana memory.** Keep Grafana's limit at 512Mi. At 256Mi it thrashed its microSD-backed volume instead of being OOM-killed, saturating the card etcd shares and cascading into node failures. When a node is "just slow", check per-container `memory.pressure`/`io.pressure` in `/sys/fs/cgroup/kubepods.slice/` before blaming the hardware.
+- **Permanent OutOfSync with no real diff.** Gateway API objects get fields defaulted by the API server, which ArgoCD's default client-side diff reports as drift. `controller.diff.server.side: "true"` in `argocd-values.yaml` fixes it.
+- **DNS.** Re-point Pi-hole records and the Cloudflare DNS-01 setup if any node or LoadBalancer IP changed. The public site doesn't depend on node or LoadBalancer IPs (the tunnel uses Envoy's in-cluster Service), but it does depend on that Service's **generated name**, hardcoded in the tunnel's route in Cloudflare's dashboard — if the Gateway is recreated differently, update the route.
 
 ## 11. Later: upgrade to 1.36
 

@@ -3,10 +3,11 @@
 # The full stack is designed for real clusters and will happily eat more RAM
 # than a Pi has. Everything below is either "turn it off" or "make it smaller".
 
-# --- Things microk8s does not expose -----------------------------------------
-# These control-plane components run bound to 127.0.0.1 under microk8s, so
-# their ServiceMonitors would scrape nothing and sit permanently red. Turning
-# them off keeps the targets page honest.
+# --- Control-plane scraping: off ----------------------------------------------
+# Disabled on the original microk8s cluster, where these components were bound
+# to 127.0.0.1 and their ServiceMonitors sat permanently red. Still off after
+# the move to kubeadm; kubeadm may expose some of them, so re-enabling is a
+# possible improvement - check each target actually goes green if you do.
 kubeControllerManager:
   enabled: false
 kubeScheduler:
@@ -33,8 +34,11 @@ alertmanager:
 grafana:
   enabled: true
 
-  # Default login is admin / prom-operator. Change it: set a password here and
-  # move it into a Secret once secrets management is scaffolded.
+  # Default login is admin / prom-operator - and this file is public. Grafana
+  # is LAN-only (grafana.lan, grafana.home.juangar.com), but this should still
+  # move to 1Password: External Secrets Operator exists now, so create an item
+  # in the K8S vault, an ExternalSecret beside it, and point
+  # grafana.admin.existingSecret at the result.
   adminPassword: prom-operator
 
   resources:

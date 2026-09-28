@@ -196,8 +196,10 @@ answering for the same address would make both flaky.
 
 ### The problem it solves
 
-There's one front door (`.210`, port 80) but several apps behind it —
-`resume.lan`, `grafana.lan`, and later `juangar.com`. Something has to look
+There's one front door (`.210`) but several apps behind it —
+`resume.lan`, `grafana.lan`, their `.home.juangar.com` twins, and
+`juangar.com` (which arrives through the Cloudflare tunnel rather than via
+`.210`, but lands at the same receptionist). Something has to look
 at each visitor and decide where they go. That's a **reverse proxy**, and
 Envoy is the one used here.
 
@@ -229,12 +231,15 @@ API**. Three layers, owned by different people in a real company:
 | Object | In this repo | Analogy |
 | --- | --- | --- |
 | `GatewayClass` | `platform/envoy-gateway/gatewayclass.yaml` | "Our reception desks are run by Envoy." Chooses the implementation. |
-| `Gateway` | `platform/envoy-gateway/gateway.yaml` (`eg`) | The front door itself: "open on port 80, accept visitors for any app." Creating it is what makes Envoy Gateway start an Envoy pod and a `LoadBalancer` Service — which is what MetalLB then gives `.210`. |
-| `HTTPRoute` | `apps/resume/templates/httproute.yaml`; Grafana's comes from its chart | A line in the lobby directory: "`resume.lan` → the `resume` Service, port 80." Each app brings its own. |
+| `Gateway` | `platform/envoy-gateway/gateway.yaml` (`eg`) | The front door itself, with its *listeners*: "open on port 80 for anyone", plus one door on port 443 per HTTPS hostname, each with that hostname's certificate. Creating it is what makes Envoy Gateway start Envoy pods and a `LoadBalancer` Service — which is what MetalLB then gives `.210`. |
+| `HTTPRoute` | `apps/resume/templates/httproute.yaml`; Grafana's comes from its chart | A line in the lobby directory: "`resume.lan` → the `resume` Service, port 80." Each app brings its own, and names which of the Gateway's listeners (doors) it's posted at. |
 
-So adding a new website never touches the Gateway, and never touches
+So adding a plain-HTTP website never touches the Gateway, and never touches
 MetalLB: the app ships an `HTTPRoute` with its hostname, and the existing
-front door starts serving it.
+front door starts serving it. An HTTPS name on the LAN
+(`something.home.juangar.com`) needs two more pieces: a cert-manager
+`Certificate` and a matching HTTPS listener on the Gateway — the door needs
+its own lock and key. See `docs/architecture.md`.
 
 ### What Envoy does *not* do
 
@@ -371,10 +376,13 @@ and node03 was fine.
 - **Grafana.** Its data lives on node03's own disk (`local-path` storage
   isn't replicated), so it can't run anywhere else. If node03 is down,
   Grafana is down.
-- **node03's SD card.** During these tests node03 dropped out once on its
-  own and its pods restart more than the other Pis'. It's the busiest Pi and
-  the slowest to write to disk — see [`rebuild.md`](rebuild.md) on why an
-  SSD is the biggest reliability upgrade available.
+- **The microSD cards.** During these tests node03 kept dropping out on its
+  own. The cause turned out to be Grafana: its memory limit was too small,
+  so it re-read its files from node03's card nonstop and starved everything
+  else sharing that card, etcd included. Raising the limit fixed it (see
+  `docs/architecture.md`). But the underlying fragility is real: all three
+  Pis run from microSD, and SSDs remain the biggest reliability upgrade
+  available.
 
 ---
 

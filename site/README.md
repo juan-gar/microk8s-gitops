@@ -7,7 +7,7 @@ This directory is the **image source**. How it gets deployed lives elsewhere:
 | What | Where |
 | --- | --- |
 | Container image build | `Dockerfile` here, built by `.github/workflows/build-site.yml` |
-| Deployment / Service / Ingress | `apps/resume` (Helm chart) |
+| Deployment / Service / HTTPRoute | `apps/resume` (Helm chart) |
 | nginx config actually used in-cluster | `apps/resume/templates/configmap.yaml` |
 | Prometheus itself | `clusters/rpi-cluster/platform/prometheus.yaml` |
 
@@ -77,7 +77,7 @@ Two notes on the last two rows:
 - The restarts query walks pod → owning ReplicaSet → Deployment, stripping the
   ReplicaSet's pod-template hash with `label_replace`. It is best-effort: pods
   not owned by a ReplicaSet aren't counted.
-- Node names only read as `pi-01` because the node-exporter ServiceMonitor
+- Node names only read as `node01` because the node-exporter ServiceMonitor
   rewrites `instance` to the node name (see `prometheus-values.yaml`).
   Without that relabeling you'd see pod IPs. The page splits `instance` on
   `:` so it degrades to an IP rather than breaking.
@@ -91,11 +91,16 @@ and read every metric in the cluster. The config narrows the blast radius —
 - `location = /api/v1/query` is an exact match, so `query_range`, `series`,
   `federate` and the admin endpoints are *not* proxied
 - `limit_except GET` rejects writes
-- `limit_req` rate-limits per client IP
+- `limit_req` rate-limits per client IP (10 r/s, per pod — with 2 replicas
+  the cluster-wide ceiling is 2×). This only works because `nginx.realIp`
+  makes nginx see the visitor's address; before that, every request came
+  from Envoy's pod IP and the limit was shared by everyone.
 
-— but it is not authentication. If this site is ever reachable from the
-internet, put auth in front of the proxy or set
-`prometheus.proxy.enabled: false` and let the page show cached values.
+— but it is not authentication. **The site is public at
+[juangar.com](https://juangar.com), deliberately**: the live metrics are the
+point of the portfolio piece, and the decision is recorded in
+`docs/architecture.md` ("Public exposure"). If that ever changes, set
+`prometheus.proxy.enabled: false` and the page falls back to cached values.
 
 ## Things to edit
 
@@ -105,7 +110,7 @@ internet, put auth in front of the proxy or set
 - `nodes` / `deployments` arrays — the fallback shown before the first
   successful scrape, and whenever Prometheus is unreachable. Both are replaced
   wholesale once a scrape succeeds.
-- Ingress hostname — `apps/resume/values.yaml`, not here. Currently
-  `resume.lan`.
+- Hostnames — `route.hostnames` in `apps/resume/values.yaml`, not here.
+  Currently `resume.lan`, `resume.home.juangar.com` and `juangar.com`.
 
 Theme choice persists in `localStorage` under `jgm-theme`.

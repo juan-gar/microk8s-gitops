@@ -19,16 +19,18 @@
 #     got a 401 trying to resolve a nonexistent image. repoURL has to be the
 #     FULL path including the chart name.
 #
-# No HTTPS listener yet - TLS needs cert-manager, which is deferred. Traefik
-# used to terminate :443 with a self-signed cert; resume.lan/grafana.lan lose
-# HTTPS until cert-manager lands.
+# HTTPS: one listener per hostname in platform/envoy-gateway/gateway.yaml,
+# with certificates from cert-manager (platform/cert-manager/).
 #
-# KNOWN FOLLOW-UP: the chart's certgen Job is a Helm pre-install/pre-upgrade
-# hook, which ArgoCD ignores by this repo's convention. First install is
-# fine. A future chart version bump will fail on an immutable-field error
-# because the old Job blocks recreation - when bumping targetRevision, also
-# `kubectl delete job -n envoy-gateway-system eg-certgen` (name may include a
-# release-derived suffix - check first) or add `Replace=true` for that sync.
+# HOOKS: the chart's certgen Job (and its ServiceAccount/Role/RoleBinding) are
+# Helm pre-install/pre-upgrade hooks. ArgoCD maps those to PreSync hooks, so
+# certgen runs at the start of every full sync (not during selective syncs).
+# With no delete policy set, ArgoCD assumes BeforeHookCreation and deletes the
+# previous Job before creating the next, so chart bumps don't hit an
+# immutable-field error. ArgoCD never prunes hook objects: anything the chart
+# STOPS rendering as a hook is left behind and must be deleted by hand (that's
+# what happened to the topology injector's webhook and certgen's ClusterRole
+# when topologyInjector was disabled).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
