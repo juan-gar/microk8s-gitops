@@ -61,8 +61,14 @@ start step 3 until then.
    we deploy `cloudflared` as a Kubernetes Deployment instead. Copy only the
    **token** out of that command: the long string after `--token`, starting
    `eyJ...`.
-4. Store that token in 1Password now (step 5) — it is shown once, and it is
-   the credential that lets anything act as this tunnel.
+4. Store that token in 1Password (step 5). It is the credential that lets
+   anything act as this tunnel. **Don't confuse it with the tunnel ID**: the
+   token is a long base64 string starting `eyJ`; the 36-character UUID shown
+   on the tunnel's page (like `f70ff985-a4ef-4643-…`) is the ID, and
+   cloudflared can't connect with it. If you need the token again later:
+   **Networking → Tunnels →** your tunnel **→ Overview → Add a replica**
+   shows the install command again. **Refresh token** on the same tab issues
+   a new one and invalidates the old one for new connections.
 5. Still in **Networking → Tunnels**, select the tunnel → **Routes** tab →
    **Add route** → **Published application**.
    - **Subdomain**: leave empty (we want the apex `juangar.com`)
@@ -117,10 +123,18 @@ External Secrets Operator pulls these into the cluster, so the item titles
 and field names below must match exactly what the `ExternalSecret` manifests
 reference. If you rename either, the manifests must change too.
 
+Create both as **Password** items. The Connect-based provider ESO uses here
+(step 6) only supports two 1Password item types —
+[`Password` and `Document`](https://external-secrets.io/latest/provider/1password-automation/)
+— anything else (Secure Note, API Credential, Login, ...) can't be fetched at
+all. `Document` is for file payloads mounted into pods; these are plain
+string tokens, so `Password` is the right shape — rename or add a field to
+hold the value.
+
 | 1Password item title    | Field name  | Contents                       |
 | ----------------------- | ----------- | ------------------------------ |
 | `cloudflare-tunnel-token` | `token`     | tunnel token from step 3       |
-| `cloudflare-api-token`    | `api-token` | API token from step 4          |
+| `cloudflare-api-token`    | `token`     | API token from step 4          |
 
 Both go in the **`K8S`** vault — the same vault the Connect server is granted
 access to in step 6.
