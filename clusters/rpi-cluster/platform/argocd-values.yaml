@@ -85,3 +85,15 @@ notifications:
 
 dex:
   enabled: false
+
+configs:
+  params:
+    # Server-side diff: ask the API server what applying git's version would
+    # produce, and compare THAT with live. The default (client-side) diff
+    # compares raw git YAML, so every field the API server fills in with a
+    # default shows up as drift - Gateway API objects are full of these
+    # (parentRefs group/kind, listener defaults), which kept envoy-gateway
+    # and prometheus permanently OutOfSync with nothing actually different.
+    # Rolls the application controller automatically (checksum/cmd-params),
+    # which the setting requires.
+    controller.diff.server.side: "true"

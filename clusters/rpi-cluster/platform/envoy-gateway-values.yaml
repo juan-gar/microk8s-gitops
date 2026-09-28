@@ -13,3 +13,10 @@ deployment:
         memory: 96Mi
       limits:
         memory: 256Mi
+
+# The topology injector is a mutating webhook that labels Envoy pods with
+# their node's zone for zone-aware routing. These Pis have no zone labels, so
+# it has nothing to add - and the chart ships it as a Helm pre-install hook,
+# which ArgoCD deletes after every sync, so it was never actually running.
+topologyInjector:
+  enabled: false
