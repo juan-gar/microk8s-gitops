@@ -1,0 +1,105 @@
+# Based on Cloudflare's Kubernetes deployment guide, with three deliberate
+# differences: a pinned image (tag + digest) instead of `latest`; liveness
+# tolerates 3 failed checks instead of 1, so one slow probe on a busy Pi
+# doesn't restart the tunnel; and no net.ipv4.ping_group_range sysctl, which
+# only matters for proxying ICMP - not used by an HTTP route.
+#
+# Two replicas on different Pis: each keeps its own connections to Cloudflare
+# for the same tunnel, so a restart or a node failure doesn't take juangar.com
+# down. Until the ExternalSecret has created the token Secret, pods fail to
+# start (CreateContainerConfigError) and recover on their own once it exists.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: cloudflared
+  labels:
+    app.kubernetes.io/name: cloudflared
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cloudflared
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cloudflared
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: cloudflared
+      securityContext:
+        # The image's non-root user; set numerically so runAsNonRoot can
+        # verify it (it rejects images that name their user rather than
+        # numbering it). Same UID Cloudflare's guide uses in its sysctl.
+        runAsUser: 65532
+        runAsGroup: 65532
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: cloudflared
+          # Latest release when added (2026-09-24). Bump deliberately; the
+          # digest makes the tag immutable.
+          image: cloudflare/cloudflared:2026.9.3@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c
+          command:
+            - cloudflared
+            - tunnel
+            - --no-autoupdate
+            - --loglevel
+            - info
+            - --output
+            - json
+            - --metrics
+            - 0.0.0.0:2000
+            - run
+          env:
+            - name: TUNNEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cloudflare-tunnel-token
+                  key: token
+          ports:
+            - name: metrics
+              containerPort: 2000
+          # /ready returns 200 once this replica has a live connection to
+          # Cloudflare.
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: metrics
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cloudflared
+  namespace: cloudflared
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cloudflared

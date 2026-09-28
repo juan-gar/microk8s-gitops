@@ -111,6 +111,12 @@ route:
     # https-resume). No public DNS record: resolve it via /etc/hosts or a LAN
     # DNS server pointing at 192.168.0.210.
     - resume.home.juangar.com
+    # Public, via Cloudflare Tunnel: cloudflared sends it to Envoy's `http`
+    # listener with Host: juangar.com. Serving this also makes the site's
+    # live cluster metrics public - a deliberate choice for a portfolio
+    # piece; the Prometheus proxy's per-client rate limit (nginx.realIp) is
+    # the abuse control.
+    - juangar.com
 
 resources:
   # Requests are what the scheduler reserves; limits are what the kernel
