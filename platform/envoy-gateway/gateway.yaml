@@ -11,6 +11,13 @@ metadata:
   namespace: envoy-gateway-system
 spec:
   gatewayClassName: eg
+  # Replica count, spreading and PDB for this Gateway's Envoy pods - see
+  # envoyproxy.yaml.
+  infrastructure:
+    parametersRef:
+      group: gateway.envoyproxy.io
+      kind: EnvoyProxy
+      name: eg
   listeners:
     - name: http
       protocol: HTTP

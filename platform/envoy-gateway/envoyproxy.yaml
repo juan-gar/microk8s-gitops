@@ -1,0 +1,39 @@
+# Shapes the Envoy proxy Deployment that Envoy Gateway creates for the `eg`
+# Gateway (attached via the Gateway's spec.infrastructure.parametersRef, which
+# has no namespace field - so this must live in the Gateway's namespace).
+#
+# Two replicas on different nodes, because the Envoy Service uses
+# externalTrafficPolicy: Local: MetalLB only announces 192.168.0.210 from a
+# node that has a ready Envoy pod. With one replica, losing that node took
+# the LAN entry point down until the pod was rescheduled - measured at ~4.5
+# minutes for a plain node01 reboot (see docs/networking-explained.md). With
+# a ready replica already on a second node, MetalLB can move the IP there
+# as soon as it notices the first node is gone.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: eg
+  namespace: envoy-gateway-system
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyDeployment:
+        replicas: 2
+        pod:
+          # Hard rule: never both replicas on one Pi, or a single node
+          # failure takes out both. 3 nodes / 2 replicas leaves room for a
+          # rolling update's surge pod and for rescheduling after a failure.
+          topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: kubernetes.io/hostname
+              whenUnsatisfiable: DoNotSchedule
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/component: proxy
+                  gateway.envoyproxy.io/owning-gateway-name: eg
+                  gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
+      # Voluntary disruptions (kubectl drain for maintenance) may take at
+      # most one replica at a time.
+      envoyPDB:
+        minAvailable: 1

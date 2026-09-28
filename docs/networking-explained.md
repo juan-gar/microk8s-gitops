@@ -76,7 +76,8 @@ sequenceDiagram
    MetalLB's whole job. See below.)*
 3. **Machine → Envoy.** The packet arrives at node01, port 80. Kubernetes'
    own traffic rules on the node (kube-proxy's iptables rules) hand it to the
-   Envoy pod, which also runs on node01.
+   Envoy pod running on node01 (there's a second one on another Pi, as a
+   standby — see below).
 4. **Envoy picks the app.** Envoy reads the HTTP `Host` header —
    `resume.lan` — and checks its routing table (the `HTTPRoute`s). It finds
    "`resume.lan` → the `resume` Service" and forwards the request there.
@@ -134,16 +135,22 @@ that's why `frrk8s.enabled: false` in the values.)
 Which Pi answers is affected by Envoy's Service setting
 `externalTrafficPolicy: Local`: *"only send outside traffic to a node that
 has an Envoy pod on it."* MetalLB respects that and only lets such nodes
-answer. There is currently **one** Envoy pod, on node01, so node01 always
-wins.
+answer.
 
 The upside of `Local`: the app sees your laptop's real IP instead of some
 intermediate hop's (visible in the resume pod's logs as
-`X-Forwarded-For: 192.168.0.47`). The downside, with one replica: **node01
-is a single point of failure for incoming traffic.** If node01 dies, the
-Envoy pod is recreated elsewhere only after Kubernetes gives up on node01
-(about 5 minutes by default), and only then can MetalLB move `.210`.
-Running two Envoy replicas would close that gap.
+`X-Forwarded-For: 192.168.0.47`). The catch: if only one Pi has an Envoy
+pod, that Pi is a single point of failure. That's how this cluster started,
+and rebooting node01 took `192.168.0.210` down for about 4½ minutes —
+MetalLB had nowhere else it was allowed to answer from, and the Envoy pod
+only returned when node01 did. Had node01 stayed dead, Kubernetes waits
+about 5 minutes before even rescheduling the pod.
+
+So Envoy now runs **two replicas, forced onto different Pis**
+(`platform/envoy-gateway/envoyproxy.yaml`). One Pi answers for `.210`; the
+other already has a ready Envoy and is allowed to take over. In the
+analogy: two receptionists in two buildings, so closing one building
+doesn't close the front door.
 
 ### The trap this cluster fell into
 
@@ -202,7 +209,8 @@ receptionist reads the badge.
 Two separate things with similar names:
 
 - **Envoy** — the proxy that actually handles requests (the receptionist).
-  Runs as the pod `envoy-envoy-gateway-system-eg-…` on node01.
+  Runs as two pods named `envoy-envoy-gateway-system-eg-…`, on different
+  Pis.
 - **Envoy Gateway** — a controller that *configures* Envoy (the office
   manager who hands the receptionist an updated directory). It watches
   Kubernetes for routing rules and translates them into Envoy's
