@@ -50,14 +50,10 @@ spec:
             - cloudflared
             - tunnel
             - --no-autoupdate
-            # HTTP/2 over TCP instead of the default QUIC (UDP). With QUIC the
-            # tunnel registered and requests reached cloudflared (its
-            # total_requests metric counted them, zero errors), but none ever
-            # arrived at Envoy and clients hung until timeout: the small
-            # packets got through, larger ones were silently dropped on the
-            # UDP path. TCP negotiates packet size itself.
-            - --protocol
-            - http2
+            # Transport left at the default (QUIC, falling back to HTTP/2).
+            # It was once forced to http2 while debugging hanging requests;
+            # the real cause was DNS (see docs/public-access-explained.md,
+            # "The DNS trap"), and QUIC works fine here.
             - --loglevel
             - info
             - --output
