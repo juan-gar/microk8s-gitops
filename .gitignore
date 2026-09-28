@@ -3,6 +3,12 @@
 .idea/
 .vscode/
 
-# never commit real secrets - use sealed-secrets/SOPS once that's scaffolded
+# never commit real secrets. Secrets come from 1Password via External
+# Secrets Operator; the two bootstrap credentials it can't fetch for itself
+# (docs/cloudflare-1password-setup.md, step 7) are created by hand and must
+# never land here.
 *.secret.yaml
 secrets.yaml
+secrets/
+1password-credentials.json
+*.credentials.json
