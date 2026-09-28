@@ -10,9 +10,16 @@
 #      a broken manifest. values.schema.json (next to this file) turns that
 #      class of mistake into a loud failure instead.
 
-# -- Number of nginx pods. Three Pis, so up to 3 is reasonable, but a static
-# site is not exactly under load. Ignored entirely when autoscaling.enabled.
-replicaCount: 1
+# -- Number of nginx pods. Two, not for load (a static site barely has any)
+# but for availability: with one replica, rebooting its node took the site
+# down for ~4 minutes even though Envoy and MetalLB had already failed over
+# to another node - there was simply no pod left to route to. Ignored
+# entirely when autoscaling.enabled.
+#
+# Side effect worth knowing: the Prometheus proxy's rate limit
+# (prometheus.proxy.rateLimit) is enforced by nginx per pod, so the
+# cluster-wide ceiling is replicaCount x that value.
+replicaCount: 2
 
 image:
   # -- Container image repository. Built from site/ by
@@ -224,6 +231,20 @@ affinity: {}
 # -- Spread pods across the three Pis rather than stacking them on one node.
 # Only takes effect when replicaCount > 1.
 topologySpreadEnabled: true
+# -- What the scheduler does when the spread can't be satisfied.
+# ScheduleAnyway treats it as a preference: after a node failure both pods
+# may land on one Pi and stay there, quietly undoing the point of having two.
+# DoNotSchedule makes it a rule - a pod waits Pending rather than double up.
+# Safe with 2 replicas on 3 nodes; revisit if replicaCount >= node count.
+topologySpreadWhenUnsatisfiable: DoNotSchedule
+
+# -- PodDisruptionBudget: caps how many pods voluntary disruptions (kubectl
+# drain, node upgrades) may evict at once. Rendered only when replicaCount > 1
+# - with a single replica, minAvailable: 1 would make that pod un-evictable
+# and block every drain of its node forever.
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
 
 podAnnotations: {}
 podLabels: {}

@@ -1,0 +1,21 @@
+{{- /*
+PodDisruptionBudget. Two conditions, both required:
+  - podDisruptionBudget.enabled, the explicit switch
+  - more than one replica: a PDB of minAvailable 1 over a single pod means
+    that pod can never be evicted, so `kubectl drain` on its node hangs.
+autoscaling is treated as "more than one" since the HPA's minReplicas is
+the floor there, not replicaCount.
+*/}}
+{{- if and .Values.podDisruptionBudget.enabled (or .Values.autoscaling.enabled (gt (int .Values.replicaCount) 1)) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "resume.fullname" . }}
+  labels:
+    {{- include "resume.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "resume.selectorLabels" . | nindent 6 }}
+{{- end }}
