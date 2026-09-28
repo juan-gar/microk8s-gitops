@@ -35,6 +35,15 @@ Nothing about the resume site needs a public A record. The tunnel provides
 reachability; DNS for `juangar.com` gets created by the tunnel route in
 step 3.
 
+**Delete the imported parking records now.** A newly registered Namecheap
+domain comes with a parking page: an `A` record for `juangar.com`
+(`192.64.119.197` here) and a `www` CNAME to `parkingpage.namecheap.com`.
+Cloudflare imports them. If the `A` record is still there in step 3, the
+tunnel route saves but **can't create its CNAME** (a name can't have both),
+and visitors get proxied to the parking server and hang. This happened on
+the first attempt — see [`public-access-explained.md`](public-access-explained.md#the-dns-trap-when-the-route-cant-create-its-record).
+Keep the `MX` and `TXT` records: they run Namecheap's email forwarding.
+
 ## 2. Point Namecheap at Cloudflare's nameservers
 
 Registration stays with Namecheap. Only DNS hosting moves, and it's free and
@@ -79,6 +88,10 @@ start step 3 until then.
      `juangar.com`.
 6. Save, then confirm the tunnel shows **Healthy** on the Tunnels page (it
    won't until the `cloudflared` pods are running).
+7. **Check the route actually created its DNS record**: **DNS → Records**
+   should show `juangar.com` as a proxied `CNAME` to
+   `<tunnel-ID>.cfargotunnel.com`. If it still shows an `A` record, delete
+   that and save the route again (or add the CNAME by hand).
 
 ### Two things worth knowing about that Service URL
 

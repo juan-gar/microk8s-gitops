@@ -4,11 +4,12 @@ A beginner-friendly walkthrough of how a visitor anywhere on the internet
 reaches the resume site at `https://juangar.com` — without your home IP
 address being published and without opening a single port on your router.
 
-> **Status: planned, not built yet.** The dashboard steps are in
+> **Status: live** since 2026-09-28. The dashboard steps are in
 > [`cloudflare-1password-setup.md`](cloudflare-1password-setup.md) (the
-> *how*); this doc is the *why*. The cluster side (`cloudflared`, External
-> Secrets, 1Password Connect) doesn't exist in the repo yet. Names like the
-> Envoy Service below are real and were read from the live cluster.
+> *how*); this doc is the *why*, plus what went wrong on the way and how it
+> was found ([The DNS trap](#the-dns-trap-when-the-route-cant-create-its-record),
+> [Two red herrings](#two-red-herrings-on-the-way)). Names like the Envoy
+> Service below are real and were read from the live cluster.
 >
 > It builds on [`networking-explained.md`](networking-explained.md), which
 > covers everything from Envoy inward. Read that first if terms like
@@ -145,9 +146,16 @@ really the `pi-cluster` tunnel." Anyone holding it can connect *as your
 tunnel* — so it's a secret. It gets stored in 1Password and pulled into the
 cluster automatically (Part 5), never committed to git.
 
+Don't mix it up with the tunnel's **ID**, which the dashboard shows much
+more prominently: a 36-character UUID like `ff926564-0adf-…`. The ID is just
+the tunnel's name tag — cloudflared can't connect with it. The token is a
+long base64 string (about 250 characters here) that starts `eyJ`. If you
+need it again: tunnel page → **Overview** → **Add a replica** shows the
+install command with the token in it.
+
 ### cloudflared: the staff member
 
-`cloudflared` is a small program; here it will run as a Kubernetes
+`cloudflared` is a small program; here it runs as a Kubernetes
 Deployment with **two replicas** (two pods). Each one calls Cloudflare
 independently. Cloudflare's docs say you "can run as many `cloudflared`
 processes (connectors) as needed" per tunnel, so with two, restarting or
@@ -177,7 +185,7 @@ Two things to notice:
 
 **Why pin the Host header?** Envoy decides which app a request is for by its
 `Host` header (see the receptionist in the networking doc). The resume app's
-`HTTPRoute` will list `juangar.com`, so requests must arrive saying
+`HTTPRoute` lists `juangar.com`, so requests must arrive saying
 `Host: juangar.com`. Cloudflare's docs don't say for certain what cloudflared
 sends if you leave it unset; setting it explicitly removes the guesswork.
 
@@ -191,6 +199,86 @@ which means lookups return Cloudflare's addresses, never yours. Per
 Cloudflare's docs, a `cfargotunnel.com` address only proxies traffic for DNS
 records in the same Cloudflare account, so nobody else can point their
 domain at your tunnel.
+
+### The DNS trap: when the route can't create its record
+
+This is what actually broke on the first attempt, and it's easy to hit.
+
+**What happened.** When `juangar.com` was added to Cloudflare, Cloudflare
+imported the records Namecheap already had — including Namecheap's
+**parking page**: an `A` record `juangar.com → 192.64.119.197` and a
+`www` alias to `parkingpage.namecheap.com`. Every newly registered domain
+has these; they're what shows the "this domain is parked" page.
+
+A name can have an `A` record *or* a `CNAME`, never both. So when the tunnel
+route was saved, Cloudflare stored the route (cloudflared received it
+correctly) but **could not create the CNAME**, because `juangar.com` was
+already taken by the parking `A` record. Nothing in the tunnel pages made
+that obvious.
+
+In the phone-book analogy: the route told the staff member inside what to do
+with calls for `juangar.com`, but the phone book still listed the *old*
+number — the empty parking lot. Every visitor dialled the parking lot.
+Because that record was proxied, Cloudflare dutifully forwarded each visitor
+to Namecheap's parking server, which never answered, and the browser just
+hung.
+
+**Why it's hard to spot from outside.** Looking the name up (`dig
+juangar.com`) returns Cloudflare's addresses either way — a proxied record
+always hides what's behind it. The TLS certificate is Cloudflare's either
+way too. From the browser, "going to the tunnel" and "going to the parking
+server" look identical until the response doesn't come.
+
+**How it was found.** By checking each hop in turn:
+1. The route config that Cloudflare pushed to cloudflared was correct
+   (it's in cloudflared's logs as "Updated to new configuration").
+2. A test pod in the `cloudflared` namespace reached Envoy's Service
+   instantly — so cloudflared *could* reach the origin.
+3. cloudflared's own request counter (`cloudflared_tunnel_total_requests` on
+   its metrics port, 2000) stayed at **0** while public requests were
+   failing, and Envoy's access log showed none either. The requests weren't
+   reaching the tunnel at all — so the problem was in front of it, in
+   Cloudflare.
+4. Listing the zone's DNS records showed the parking `A` record and no tunnel
+   CNAME.
+
+**The fix.** Delete the parking `A` record, then create the CNAME the route
+should have made: `juangar.com → ff926564-0adf-4c71-bda0-c936bcfa2813.cfargotunnel.com`,
+proxied. (Saving the route again in the dashboard after deleting the `A`
+record should do the same.) The `www` parking alias was deleted too — this
+site deliberately has no `www`, so it no longer resolves at all.
+
+The zone now holds only:
+
+| Record | Points to | Why |
+| --- | --- | --- |
+| `CNAME juangar.com` | `<tunnel-ID>.cfargotunnel.com` (proxied) | the website, via the tunnel |
+| 5× `MX juangar.com` | `eforward1–5.registrar-servers.com` | Namecheap's email forwarding for `@juangar.com` — kept |
+| `TXT juangar.com` | `v=spf1 include:spf.efwd.registrar-servers.com ~all` | tells other mail servers that forwarding is legitimate — kept |
+
+**Lesson for next time:** after onboarding a domain to Cloudflare, open
+**DNS → Records** and delete any imported parking records *before* creating
+tunnel routes.
+
+### Two red herrings on the way
+
+Debugging went wrong twice before the DNS trap was found. Both are worth
+knowing because they look convincing.
+
+1. **Tunnel ID stored instead of the token.** The 1Password item first held
+   the 36-character tunnel ID. It was caught before deploying by checking the
+   stored value's *length and first characters* (never printing it): a token
+   starts `eyJ` and is long. Checking the shape of a secret without revealing
+   it is a useful habit.
+2. **"It's QUIC."** cloudflared talks to Cloudflare over QUIC (UDP) by
+   default, and a known failure mode is small packets getting through while
+   larger ones are dropped. cloudflared's request counter showed a couple of
+   requests, and none reached Envoy — which fit that theory, so the tunnel
+   was switched to HTTP/2 over TCP. Nothing changed, and the counter then
+   read 0: those earlier requests hadn't been the test traffic at all. The
+   lesson: before blaming a layer, confirm the counter you're reading
+   actually moves when *you* send a request. QUIC was restored once DNS was
+   fixed and works fine.
 
 ---
 
@@ -241,8 +329,13 @@ Cloudflare → cloudflared), and only the final in-cluster hop is plain HTTP.
 
 Two secrets are involved: the **tunnel token** (for cloudflared) and a
 **Cloudflare API token** (for cert-manager, Part 6). Neither may go in git,
-which is public. The plan is to keep them in 1Password and have the cluster
-fetch them.
+which is public. They're kept in 1Password and the cluster fetches them.
+
+Both items must be 1Password **Password**-type items — the only type (with
+Document) that ESO's Connect provider can read — with the value in a field
+labelled exactly `token`. ESO matches the field by its label; a
+near-miss like `api-token` fails with "expected one 1Password ItemField
+matching".
 
 The analogy is a safe in a back office:
 
@@ -301,7 +394,7 @@ DNS server pointing at `192.168.0.210`); they get **no** public DNS records.
 | --- | --- | --- |
 | Domain registration (`juangar.com`) | Namecheap | no |
 | Nameserver setting ("ask Cloudflare") | Namecheap | no |
-| DNS records, including the tunnel CNAME | Cloudflare | no |
+| DNS records: the tunnel CNAME, email MX/TXT | Cloudflare | no |
 | Tunnel and its route (Service URL, Host header) | Cloudflare | no |
 | Public HTTPS certificate for `juangar.com` | Cloudflare (automatic) | no |
 | Tunnel token, Cloudflare API token | 1Password `K8S` vault | no |
@@ -316,22 +409,31 @@ repo shows no change, look there.
 | Symptom | Likely cause | Check |
 | --- | --- | --- |
 | `juangar.com` doesn't resolve at all | Nameservers not switched yet, or still propagating | Cloudflare shows the domain **Active**? |
+| TLS works but the page **hangs until timeout**; cloudflared's request counter stays at 0 | DNS points somewhere other than the tunnel — e.g. an imported parking `A` record | Cloudflare **DNS → Records**: is `juangar.com` a CNAME to `<tunnel-ID>.cfargotunnel.com`? See [The DNS trap](#the-dns-trap-when-the-route-cant-create-its-record) |
 | Cloudflare error page **1016** | DNS points at the tunnel, but no cloudflared is connected | `kubectl get pods -n cloudflared`; tunnel **Healthy** in the dashboard? |
-| cloudflared crash-looping | Token Secret missing — ESO hasn't fetched it | `kubectl get externalsecret -n cloudflared` |
+| cloudflared not starting, or failing to connect | Token Secret missing (ESO hasn't fetched it), or the item holds the tunnel ID instead of the token | `kubectl get externalsecret -n cloudflared`; the value should start `eyJ` |
 | **502** from Cloudflare | cloudflared connected but can't reach the Service URL | Has Envoy's Service name changed? `kubectl get svc -n envoy-gateway-system` |
 | **404** | Request reached Envoy, but no route matches `juangar.com` | `kubectl get httproute -n resume -o yaml` — is `juangar.com` in `hostnames`? |
 | Email stopped after the switch | `MX` records weren't copied to Cloudflare | Cloudflare DNS page |
 
-## Known issue to fix before going public
+## Rate limiting per visitor (fixed before going public)
 
-The resume site's nginx rate-limits its live-metrics endpoint "per client
-IP" (10 requests/s). But nginx currently sees every request as coming from
-**Envoy's** pod address, not the visitor's — the real address is only in the
-`X-Forwarded-For` header (checked on the live cluster). So today it's one
-limit shared by everyone. That's harmless on the LAN; on a public site, one
-busy visitor could throttle all the others. nginx needs to be told to trust
-the forwarded address from Envoy before this is the public abuse control the
-plan counts on.
+The resume site's nginx rate-limits its live-metrics endpoint to 10
+requests/s per client IP. Before going public, a check of nginx's logs
+showed a problem: every request came from **Envoy's** pod address, because
+Envoy is the one connecting to nginx. So it was one limit shared by every
+visitor — one busy visitor could throttle everyone.
+
+The fix is nginx's `realip` module (`nginx.realIp` in
+`apps/resume/values.yaml`): nginx trusts the `X-Forwarded-For` header, but
+only from addresses in the pod network, and reads it from the right,
+skipping trusted hops. For a public visitor the header arrives as
+`<visitor>, <cloudflared pod>`: Cloudflare adds the visitor's address,
+Envoy adds cloudflared's. nginx skips the cloudflared pod and uses the
+visitor. A visitor who sends a fake `X-Forwarded-For` only adds an entry
+further left, which nginx never reaches — verified by sending
+`X-Forwarded-For: 6.6.6.6` through `juangar.com` and seeing nginx use the
+real address.
 
 ---
 

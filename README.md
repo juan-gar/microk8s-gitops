@@ -11,7 +11,7 @@ ArgoCD syncs onto it once it's up.
   guide to how a request reaches an app: MetalLB, Envoy Gateway and Cilium,
   with analogies.
 - [`docs/public-access-explained.md`](docs/public-access-explained.md) —
-  beginner's guide to the planned public path: Namecheap, Cloudflare DNS, the
+  beginner's guide to the public path: Namecheap, Cloudflare DNS, the
   tunnel and its route, and where secrets and certificates fit.
 - [`docs/architecture.md`](docs/architecture.md) — repo layout, how to add apps
   and platform components.
@@ -106,6 +106,15 @@ git: edit a manifest, commit, push, let ArgoCD sync.
   for Longhorn — see `docs/architecture.md`.
 - **kube-prometheus-stack** — Prometheus, Grafana, node-exporter and
   kube-state-metrics, tuned down for Pi hardware (Alertmanager off).
+- **1Password Connect + External Secrets Operator** — secrets come from the
+  1Password vault `K8S` as `ExternalSecret`s; only the two bootstrap
+  credentials are made by hand
+  ([setup doc](docs/cloudflare-1password-setup.md), step 7).
+- **cert-manager** — real Let's Encrypt certificates via Cloudflare DNS-01 for
+  the LAN-only `resume.home.juangar.com` and `grafana.home.juangar.com`.
+- **cloudflared** — Cloudflare Tunnel publishing the resume site at
+  **https://juangar.com**, with no open router ports
+  ([how it works](docs/public-access-explained.md)).
 - **`apps/resume`** — the resume site chart, and the reference chart for this
   repo. Heavily commented as a Helm tutorial; copy it for new apps.
 
@@ -141,10 +150,9 @@ Prometheus and its panels fall back to cached values. The one failure mode that
 resolve) is deliberately avoided; see the comments in
 `apps/resume/templates/configmap.yaml`.
 
-Not yet scaffolded: cert-manager/TLS, replicated storage (Longhorn - see
+Not yet scaffolded: replicated storage (Longhorn - see
 `docs/architecture.md` for why `local-path-provisioner` is standing in for
-it), and secrets management (External Secrets Operator + 1Password Connect).
-Add each
+it). Add new components
 as a new file under `clusters/rpi-cluster/platform/` following the pattern in
 `envoy-gateway.yaml` (or `cilium.yaml` if it also needs plain CR manifests
 alongside its chart — see `docs/architecture.md`).
