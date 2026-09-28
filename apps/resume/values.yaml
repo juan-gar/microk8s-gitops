@@ -100,6 +100,10 @@ route:
   # -- CHANGE THIS to whatever your router/DNS resolves to the Gateway's IP.
   hostnames:
     - resume.lan
+    # HTTPS on the LAN with a real certificate (Gateway listener
+    # https-resume). No public DNS record: resolve it via /etc/hosts or a LAN
+    # DNS server pointing at 192.168.0.210.
+    - resume.home.juangar.com
 
 resources:
   # Requests are what the scheduler reserves; limits are what the kernel

@@ -25,3 +25,33 @@ spec:
       allowedRoutes:
         namespaces:
           from: All
+    # HTTPS, one listener PER HOSTNAME. Gateway API only guarantees a single
+    # certificateRefs entry per listener (more is implementation-specific), so
+    # don't "simplify" these into one listener with two certificates. Each
+    # Secret is written by a cert-manager Certificate in this namespace
+    # (platform/cert-manager/) - it must be here, next to the Gateway, or the
+    # listener goes ResolvedRefs=False with RefNotPermitted.
+    - name: https-resume
+      protocol: HTTPS
+      port: 443
+      hostname: resume.home.juangar.com
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: resume-home-tls
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: https-grafana
+      protocol: HTTPS
+      port: 443
+      hostname: grafana.home.juangar.com
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: grafana-home-tls
+      allowedRoutes:
+        namespaces:
+          from: All

@@ -17,4 +17,6 @@ spec:
     - resume.home.juangar.com
   issuerRef:
     kind: ClusterIssuer
-    name: letsencrypt-staging
+    # Proven against letsencrypt-staging first (issued in ~2 min), then
+    # switched here.
+    name: letsencrypt-prod

@@ -58,10 +58,15 @@ grafana:
       enabled: true
       hostnames:
         - grafana.lan
+        # Real certificate via the https-grafana listener; LAN-only name.
+        - grafana.home.juangar.com
       parentRefs:
         - name: eg
           namespace: envoy-gateway-system
           sectionName: http
+        - name: eg
+          namespace: envoy-gateway-system
+          sectionName: https-grafana
 
   # Persist dashboards/users across restarts. Without this, anything created
   # through the UI is lost on every pod restart - which, on a cluster whose
