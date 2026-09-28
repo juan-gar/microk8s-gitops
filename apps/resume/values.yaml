@@ -93,10 +93,17 @@ route:
   # check `kubectl get svc -n envoy-gateway-system` for the actual address.
   # No HTTPS listener yet; that needs cert-manager (not yet scaffolded).
   enabled: true
+  # One entry per Gateway listener this route should attach to. sectionName
+  # pins it to a named listener; the HTTPS listener is hostname-specific
+  # (resume.home.juangar.com), so without its own entry that hostname gets
+  # a valid certificate and then a 404.
   parentRefs:
     - name: eg
       namespace: envoy-gateway-system
       sectionName: http
+    - name: eg
+      namespace: envoy-gateway-system
+      sectionName: https-resume
   # -- CHANGE THIS to whatever your router/DNS resolves to the Gateway's IP.
   hostnames:
     - resume.lan
