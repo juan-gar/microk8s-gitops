@@ -51,6 +51,12 @@ Keep this picture in mind; each section below zooms into one role.
 
 ## A request's journey, step by step
 
+Which Pi each pod sits on below is a snapshot from when this was written.
+Pods move — after a reboot, a rollout, a node failure — and there are two
+of both Envoy and the resume app, on different Pis. `kubectl get pods -A -o
+wide` shows today's placement; the steps are the same whichever Pis they
+are.
+
 ```mermaid
 sequenceDiagram
     participant L as Laptop (192.168.0.47)
@@ -124,7 +130,7 @@ address: the only reason traffic reaches a Pi is that MetalLB's speaker
 answers the shout. If nobody answers, the packet has nowhere to go — the
 address exists on paper only.
 
-### Only one Pi answers — and why it's node01
+### Only one Pi answers at a time
 
 In L2 mode, exactly one speaker answers for each IP at a time; if that Pi
 dies, another takes over and announces the IP from itself. (L2 means "layer
@@ -139,18 +145,14 @@ answer.
 
 The upside of `Local`: the app sees your laptop's real IP instead of some
 intermediate hop's (visible in the resume pod's logs as
-`X-Forwarded-For: 192.168.0.47`). The catch: if only one Pi has an Envoy
-pod, that Pi is a single point of failure. That's how this cluster started,
-and rebooting node01 took `192.168.0.210` down for about 4½ minutes —
-MetalLB had nowhere else it was allowed to answer from, and the Envoy pod
-only returned when node01 did. Had node01 stayed dead, Kubernetes waits
-about 5 minutes before even rescheduling the pod.
-
-So Envoy now runs **two replicas, forced onto different Pis**
-(`platform/envoy-gateway/envoyproxy.yaml`). One Pi answers for `.210`; the
-other already has a ready Envoy and is allowed to take over. In the
-analogy: two receptionists in two buildings, so closing one building
-doesn't close the front door.
+`X-Forwarded-For: 192.168.0.47`). The catch: MetalLB can only answer from a
+Pi that has an Envoy pod, so if there's only one Envoy, its Pi is a single
+point of failure. That's why Envoy runs **two replicas, forced onto
+different Pis** (`platform/envoy-gateway/envoyproxy.yaml`): one Pi answers
+for `.210`, and the other already has a ready Envoy and is allowed to take
+over. In the analogy: two receptionists in two buildings, so closing one
+building doesn't close the front door. What that bought, measured, is in
+[What happens when a Pi dies](#what-happens-when-a-pi-dies-measured).
 
 ### The trap this cluster fell into
 
@@ -214,8 +216,10 @@ Two separate things with similar names:
 - **Envoy Gateway** — a controller that *configures* Envoy (the office
   manager who hands the receptionist an updated directory). It watches
   Kubernetes for routing rules and translates them into Envoy's
-  configuration. It never sees your traffic. Runs as `envoy-gateway-…`,
-  currently on node03.
+  configuration. It never sees your traffic. Runs as a single
+  `envoy-gateway-…` pod. That's fine as one copy: if it's down, the Envoy
+  pods keep serving with the last configuration they received — you just
+  can't change routes until it's back.
 
 ### The routing rules: Gateway API
 
@@ -292,6 +296,88 @@ exactly one owner:
 
 ---
 
+## What happens when a Pi dies (measured)
+
+Having two of something only helps if the second one takes over. This was
+tested by rebooting one Pi at a time while a laptop requested the resume
+site once per second and recorded two things: the HTTP result, and which
+Pi's MAC address was answering for `192.168.0.210`. The cluster was changed
+between tests, so each row shows what one more layer of redundancy bought.
+
+| Pi rebooted | Setup at the time | Site fully down | Partly failing |
+| --- | --- | --- | --- |
+| node01 | 1 Envoy (on node01), 1 resume | **~4½ minutes** | – |
+| node03 | 2 Envoy, 1 resume (on node03) | **~3¾ minutes** | – |
+| node02 | 2 Envoy, 2 resume — today's setup | **none** | 71 seconds, half of requests |
+
+### Test 1 — one Envoy: the front door had nowhere to go
+
+The only Envoy was on node01. When node01 went down, MetalLB wasn't allowed
+to answer for `.210` from the other Pis (no Envoy there), so nothing
+answered at all. The site returned only once node01 finished rebooting and
+its Envoy started up again. Had node01 stayed dead, it would have been worse:
+Kubernetes waits about **5 minutes** after a Pi stops responding before it
+moves that Pi's pods elsewhere, and only then could the IP follow.
+
+Meanwhile the Kubernetes API itself (`192.168.0.200`, kube-vip) moved to
+node03 the instant node01 went down — `kubectl` never stopped working.
+The control plane was already redundant; the path into the apps wasn't.
+
+### Test 2 — two Envoys: the door moved in one second, the room behind it was empty
+
+With Envoy on node02 and node03, rebooting node03 (which was answering for
+`.210`) showed the IP move to node02 **within about one second** — the
+laptop's ARP entry switched to node02's MAC. That part worked exactly as
+designed.
+
+But the site stayed down anyway, because the resume app still had only one
+pod, on node03. node02's Envoy was answering: a request for a made-up
+hostname got an instant `404`. Requests for `resume.lan` hung for 10 seconds
+and then failed with `upstream connect error … connection timeout` — Envoy
+had nowhere to send them. In the analogy: the receptionist moved buildings
+in a second, but the only person you'd come to see was in the building that
+closed.
+
+Worth noticing: once node03 came back, MetalLB moved `.210` back to it.
+The speakers pick which Pi answers by a fixed rule, so a returning Pi can
+take the address back. That move caused no visible outage.
+
+### Test 3 — two of everything: no outage, one awkward minute
+
+With Envoy on node02 and node03, and the resume app on node01 and node02,
+rebooting node02 caused no outage — but for **71 seconds, about half of
+requests failed**, then everything returned to normal while node02 was
+still rebooting.
+
+Why half, and why 71 seconds? Envoy spreads requests across the resume pods
+it knows about, alternating between them. When node02 died, its resume pod
+vanished without telling anyone, and Envoy kept sending every second
+request to it. Kubernetes only removes a pod from the list once it
+concludes the pod's Pi is dead — and a Pi that stops responding isn't
+declared dead until it's been silent for a while (about a minute here),
+because a short network hiccup shouldn't trigger a failover. From that
+moment on, every request succeeded.
+
+The IP never moved in this test: node03 was answering for `.210` throughout,
+and node03 was fine.
+
+### What's still not redundant
+
+- **The awkward minute.** Envoy could skip a dead pod on its own instead of
+  waiting for Kubernetes: *retries* (resend a failed request to the other
+  pod) and *passive health checks* (stop using a pod after a few failures).
+  Envoy Gateway configures both with a `BackendTrafficPolicy`. Not set up
+  yet.
+- **Grafana.** Its data lives on node03's own disk (`local-path` storage
+  isn't replicated), so it can't run anywhere else. If node03 is down,
+  Grafana is down.
+- **node03's SD card.** During these tests node03 dropped out once on its
+  own and its pods restart more than the other Pis'. It's the busiest Pi and
+  the slowest to write to disk — see [`rebuild.md`](rebuild.md) on why an
+  SSD is the biggest reliability upgrade available.
+
+---
+
 ## Who does what — summary
 
 | Question | Answered by | Where it's configured |
@@ -302,7 +388,7 @@ exactly one owner:
 | Which pod backs this Service? | kube-proxy | automatic, from the Service's selector |
 | How does a packet get to a pod on another Pi? | Cilium (VXLAN) | `cilium-values.yaml` |
 | What's `resume.lan`'s address? | your laptop's `/etc/hosts` | outside the cluster |
-| What's `resume.default.svc…`'s address, inside the cluster? | CoreDNS (`10.96.0.10`) | automatic |
+| What's `resume.resume.svc.cluster.local`'s address, inside the cluster? | CoreDNS (`10.96.0.10`) | automatic |
 
 ### When something breaks, which layer?
 
@@ -313,6 +399,7 @@ exactly one owner:
 | Connects, but `404` / wrong site | Envoy routing | `kubectl get httproute -A` — is the hostname there, and `Accepted`? |
 | `503` from Envoy | the app, or the Service has no ready pods | `kubectl get pods,endpointslices -n <app>` |
 | Pods can't reach each other, nodes `NotReady` | Cilium | `kubectl get pods -n kube-system -l k8s-app=cilium` |
+| About half of requests fail for ~a minute, then it recovers on its own | a Pi just died; Kubernetes hasn't declared it dead yet | expected — see [What happens when a Pi dies](#what-happens-when-a-pi-dies-measured) |
 
 ---
 
