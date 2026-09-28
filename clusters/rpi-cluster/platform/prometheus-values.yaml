@@ -42,9 +42,15 @@ grafana:
       cpu: 25m
       memory: 96Mi
     limits:
-      # Grafana is a Go binary plus a JS frontend; 256Mi is comfortable for a
-      # handful of dashboards on a Pi.
-      memory: 256Mi
+      # 256Mi was NOT enough, and the failure mode is nasty: Grafana sat at
+      # 255MB of 256Mi, so the kernel kept evicting its page cache and it
+      # re-read its files from node03's SD card nonstop (80% I/O stall in its
+      # cgroup). That saturated the card etcd, the API server and the
+      # kubelet share, repeatedly took node03 NotReady, and cascaded onto
+      # the other nodes. A container at its memory limit doesn't always get
+      # OOM-killed - it can thrash instead. Check memory.current vs
+      # memory.max in its cgroup before lowering this again.
+      memory: 512Mi
 
   # Reachable at grafana.lan via the cluster's shared Envoy Gateway - same
   # Gateway the resume site uses, see apps/resume/values.yaml's `route`
