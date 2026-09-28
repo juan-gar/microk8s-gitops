@@ -1,0 +1,43 @@
+# cert-manager: obtains and renews real Let's Encrypt certificates for the
+# LAN-only *.home.juangar.com hostnames, using the DNS-01 challenge through
+# Cloudflare's API - so the Pis never have to be reachable from the internet.
+# (juangar.com itself doesn't need this: Cloudflare terminates its public
+# TLS.) See docs/public-access-explained.md, Part 6.
+#
+# Three sources, same convention as envoy-gateway.yaml. The third
+# (platform/cert-manager) carries the ClusterIssuers, the Certificates and the
+# ExternalSecret for the Cloudflare API token - only applied because this
+# Application lists it.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+spec:
+  project: default
+  sources:
+    - repoURL: https://charts.jetstack.io
+      chart: cert-manager
+      targetRevision: v1.21.2
+      helm:
+        releaseName: cert-manager
+        valueFiles:
+          - $values/clusters/rpi-cluster/platform/cert-manager-values.yaml
+    - repoURL: https://github.com/juan-gar/pi-cluster-gitops.git
+      targetRevision: main
+      ref: values
+    - repoURL: https://github.com/juan-gar/pi-cluster-gitops.git
+      targetRevision: main
+      path: platform/cert-manager
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      # ClusterIssuer/Certificate CRDs arrive in this same sync.
+      - SkipDryRunOnMissingResource=true

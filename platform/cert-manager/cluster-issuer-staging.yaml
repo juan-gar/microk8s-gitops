@@ -1,0 +1,25 @@
+# Let's Encrypt STAGING: untrusted certificates, generous rate limits. Point
+# a Certificate here first when changing anything about issuance - production
+# allows only 5 duplicate certificates per week per set of hostnames, which
+# a DNS or token mistake can burn through quickly.
+#
+# No email: it's optional for ACME, and this repo is public.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    # cert-manager creates this Secret (the ACME account key) on first use.
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+    solvers:
+      - selector:
+          dnsZones:
+            - juangar.com
+        dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token

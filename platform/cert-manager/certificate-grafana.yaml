@@ -1,0 +1,20 @@
+# Certificate for grafana.home.juangar.com - LAN-only (no public DNS record), but
+# a real Let's Encrypt certificate thanks to DNS-01.
+#
+# Lives in envoy-gateway-system, NOT the grafana namespace: cert-manager writes
+# the TLS Secret into the Certificate's own namespace, and a Gateway listener
+# may only reference Secrets in the Gateway's namespace (anything else needs a
+# ReferenceGrant, or the listener goes ResolvedRefs=False/RefNotPermitted).
+# The Gateway `eg` is in envoy-gateway-system, so the Certificate is too.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: grafana-home
+  namespace: envoy-gateway-system
+spec:
+  secretName: grafana-home-tls
+  dnsNames:
+    - grafana.home.juangar.com
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt-staging

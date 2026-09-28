@@ -1,0 +1,45 @@
+# Off by default in this chart; the ClusterIssuers and Certificates in
+# platform/cert-manager/ need them. (`installCRDs` is the deprecated name.)
+crds:
+  enabled: true
+
+# DNS-01 flow: cert-manager writes a _acme-challenge TXT record via
+# Cloudflare's API, waits until it can see the record itself, then asks
+# Let's Encrypt to check. That "can I see it yet" self-check normally goes
+# through the cluster's DNS -> the home router; asking public resolvers
+# directly avoids a stale or filtering router cache stalling issuance.
+dns01RecursiveNameservers: "1.1.1.1:53,1.0.0.1:53"
+dns01RecursiveNameserversOnly: true
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 48Mi
+  limits:
+    memory: 160Mi
+
+webhook:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 24Mi
+    limits:
+      memory: 64Mi
+
+# Injects CA bundles into webhook configurations at runtime (cert-manager's
+# own included) - ServerSideApply keeps that from showing as ArgoCD drift.
+cainjector:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 48Mi
+    limits:
+      memory: 160Mi
+
+startupapicheck:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 64Mi
