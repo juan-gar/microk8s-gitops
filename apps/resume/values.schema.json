@@ -197,7 +197,15 @@
       "type": "object",
       "properties": {
         "extraServerConfig": { "type": "string" },
-        "assetCacheSeconds": { "type": "integer", "minimum": 0 }
+        "assetCacheSeconds": { "type": "integer", "minimum": 0 },
+        "realIp": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "trustedCidrs": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "header": { "type": "string" }
+          }
+        }
       }
     },
     "env": {

@@ -198,6 +198,23 @@ nginx:
   # -- Extra directives injected into the nginx server block. Multi-line
   # string, indented into the ConfigMap by the template.
   extraServerConfig: ""
+  # -- Recover the real client IP from X-Forwarded-For. Every request reaches
+  # nginx through Envoy, so without this nginx's $remote_addr is always an
+  # Envoy pod's IP: the logs show Envoy, and the Prometheus proxy's "per
+  # client IP" rate limit becomes ONE limit shared by every visitor (verified
+  # on the live cluster before this was added).
+  #
+  # nginx only believes the header when the direct peer is in trustedCidrs,
+  # and with recursive it walks the header right-to-left past trusted hops,
+  # taking the first untrusted address. That's the entry Envoy appended for
+  # a LAN client, or Cloudflare appended for a public one - so a visitor
+  # can't dodge the limit by sending their own X-Forwarded-For.
+  realIp:
+    enabled: true
+    # The pod network (cluster CIDR): Envoy and cloudflared both run as pods.
+    trustedCidrs:
+      - 10.244.0.0/16
+    header: X-Forwarded-For
   # -- Cache-Control max-age for static assets, in seconds. Templated into
   # nginx.conf to show that config files are just more template output.
   assetCacheSeconds: 3600
