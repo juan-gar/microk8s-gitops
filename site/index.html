@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Juan García Miñano — Senior DevOps Engineer</title>
-<meta name="description" content="Senior DevOps Engineer in Barcelona. GitOps platforms on GKE with ArgoCD, Terraform and Helm. Self-hosted on a Raspberry Pi k3s cluster.">
+<meta name="description" content="Senior DevOps Engineer in Barcelona. GitOps platforms on GKE with ArgoCD, Terraform and Helm. Self-hosted on a Raspberry Pi Kubernetes cluster built with kubeadm.">
 <link rel="stylesheet" href="styles.css">
 <style>
   body { margin: 0; }
@@ -46,11 +46,16 @@
   .meta { font-size: 12px; letter-spacing: .1em; text-transform: uppercase;
     color: color-mix(in srgb, var(--color-text) 55%, transparent); white-space: nowrap; }
 
+  .intro { max-width: 72ch; margin: 0 0 var(--space-8); line-height: 1.6;
+    color: color-mix(in srgb, var(--color-text) 78%, transparent); }
+  .intro .stack { display: block; margin-top: var(--space-3); font-size: 14px; }
   .panel { padding: var(--space-8); display: grid; gap: var(--space-8); }
   .panel h3 { margin: 0; font-size: 20px; letter-spacing: .06em; text-transform: uppercase; }
   .panel-head { display: flex; align-items: baseline; justify-content: space-between;
     margin-bottom: var(--space-6); }
-  .nodes { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-6); }
+  /* As many columns as fit, so 3 nodes fill the row instead of leaving an
+     empty 4th slot (and a 4th Pi would just slot in). */
+  .nodes { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--space-6); }
   .node { border: 1px solid var(--color-divider); padding: var(--space-6);
     display: grid; gap: var(--space-4); transition: background .18s; }
   .node:hover { background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
@@ -118,7 +123,11 @@
   @media (max-width: 900px) {
     .hero { grid-template-columns: 1fr; padding: 56px 0 48px; }
     .hero h1 { font-size: 52px; }
-    .nodes { grid-template-columns: repeat(2, 1fr); }
+    /* Headers put a label beside the title; labels are nowrap on wide
+       screens, which on a phone pushed the page wider than the viewport. */
+    .sec-head, .panel-head { flex-wrap: wrap; gap: var(--space-2) var(--space-6); }
+    .meta { white-space: normal; }
+    table.table td { overflow-wrap: anywhere; }
     .skills { grid-template-columns: 1fr; }
     .role { grid-template-columns: 1fr; gap: var(--space-2); }
     header.top nav { gap: var(--space-4); font-size: 12px; }
@@ -131,9 +140,9 @@
 
     <header class="top">
       <nav>
-        <a href="#cluster">Cluster</a>
-        <a href="#skills">Skills</a>
         <a href="#experience">Experience</a>
+        <a href="#skills">Skills</a>
+        <a href="#cluster">Cluster</a>
         <a href="#contact">Contact</a>
         <button class="btn btn-secondary" id="theme-toggle" type="button">Dark</button>
       </nav>
@@ -148,16 +157,37 @@
       <div class="facts">
         <div><span class="fact-key">Location</span><span>Barcelona, ES</span></div>
         <div><span class="fact-key">Local time</span><span id="local-time">—</span></div>
-        <div><span class="fact-key">Served from</span><span>Raspberry Pi cluster</span></div>
+        <div><span class="fact-key">Served from</span><a href="#cluster">Raspberry Pi cluster ↓</a></div>
         <div><span class="fact-key">Status</span><span style="display:flex;align-items:center;gap:8px"><i class="live-dot"></i><span id="status-line">connecting…</span></span></div>
       </div>
     </section>
 
+
+
+    <section id="experience">
+      <h2>Experience</h2>
+      <div id="roles"></div>
+    </section>
+
+    <section id="skills">
+      <h2>Skills &amp; tooling</h2>
+      <div class="skills" id="skills-grid"></div>
+    </section>
+
     <section id="cluster">
       <div class="sec-head">
-        <h2>The cluster this page runs on</h2>
+        <h2>How this page is built</h2>
         <div class="meta">source: prometheus · <span id="source-label">connecting</span></div>
       </div>
+
+      <p class="intro">
+        This site runs on three Raspberry Pis in my home: a Kubernetes cluster I
+        built from bare metal with kubeadm and manage entirely through GitOps.
+        The numbers below are live, straight from its Prometheus. Everything —
+        from the network setup to this page's own deployment — is in
+        <a href="https://github.com/juan-gar/pi-cluster-gitops" target="_blank" rel="noopener">the repo on GitHub</a>.
+        <span class="stack meta" style="white-space:normal">kubeadm · Cilium · MetalLB · Envoy Gateway · ArgoCD · cert-manager · External Secrets + 1Password · Cloudflare Tunnel · Prometheus</span>
+      </p>
 
       <div class="blueprint panel">
         <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
@@ -190,16 +220,6 @@
       </div>
     </section>
 
-    <section id="skills">
-      <h2>Skills &amp; tooling</h2>
-      <div class="skills" id="skills-grid"></div>
-    </section>
-
-    <section id="experience">
-      <h2>Experience</h2>
-      <div id="roles"></div>
-    </section>
-
     <section id="contact">
       <div class="blueprint contact">
         <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
@@ -216,7 +236,7 @@
 
     <footer class="bottom">
       <span>garciaminanojuan@gmail.com</span>
-      <span>self-hosted · k3s on raspberry pi</span>
+      <span>self-hosted · kubeadm on raspberry pi</span>
     </footer>
 
   </div>
@@ -250,18 +270,18 @@ const ROLES = [
 /* Fallback shown until Prometheus answers — edit to match your cluster.
    Both arrays are replaced wholesale once a scrape succeeds. */
 let nodes = [
-  { name: "pi-01", role: "control-plane", cpu: 0.31, mem: 0.54 },
-  { name: "pi-02", role: "worker", cpu: 0.62, mem: 0.71 },
-  { name: "pi-03", role: "worker", cpu: 0.18, mem: 0.44 }
+  { name: "node01", role: "control-plane", cpu: 0.25, mem: 0.55 },
+  { name: "node02", role: "control-plane", cpu: 0.30, mem: 0.65 },
+  { name: "node03", role: "control-plane", cpu: 0.25, mem: 0.60 }
 ];
 let deployments = [
-  { name: "resume", ns: "resume", ready: "1/1", restarts: 0 },
-  { name: "traefik", ns: "traefik", ready: "3/3", restarts: 0 },
-  { name: "prometheus-kube-state-metrics", ns: "monitoring", ready: "1/1", restarts: 0 },
-  { name: "argocd-server", ns: "argocd", ready: "1/1", restarts: 0 },
-  { name: "argocd-repo-server", ns: "argocd", ready: "1/1", restarts: 0 }
+  { name: "resume", ns: "resume", ready: "2/2", restarts: 0 },
+  { name: "cloudflared", ns: "cloudflared", ready: "2/2", restarts: 0 },
+  { name: "envoy-envoy-gateway-system-eg", ns: "envoy-gateway-system", ready: "2/2", restarts: 0 },
+  { name: "cert-manager", ns: "cert-manager", ready: "1/1", restarts: 0 },
+  { name: "argocd-server", ns: "argocd", ready: "1/1", restarts: 0 }
 ];
-let pods = 14, live = false;
+let pods = 50, live = false;
 
 /* ── rendering ──────────────────────────────────────────────────────────── */
 const $ = (id) => document.getElementById(id);
@@ -313,7 +333,9 @@ function renderStatic() {
 }
 
 function renderStatus() {
-  $("status-line").textContent = nodes.length + (live ? " nodes up" : " nodes (cached)");
+  $("status-line").textContent = live
+    ? nodes.length + " nodes up · " + pods + " pods"
+    : nodes.length + " nodes (cached)";
   $("source-label").textContent = live ? "live" : "unreachable — last known values";
 }
 
