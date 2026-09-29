@@ -34,12 +34,16 @@ alertmanager:
 grafana:
   enabled: true
 
-  # Default login is admin / prom-operator - and this file is public. Grafana
-  # is LAN-only (grafana.lan, grafana.home.juangar.com), but this should still
-  # move to 1Password: External Secrets Operator exists now, so create an item
-  # in the K8S vault, an ExternalSecret beside it, and point
-  # grafana.admin.existingSecret at the result.
-  adminPassword: prom-operator
+  # Admin login comes from 1Password via External Secrets Operator
+  # (platform/prometheus/externalsecret-grafana-admin.yaml), not from this
+  # public file. With existingSecret set, the chart stops rendering its own
+  # Secret holding the old default (admin / prom-operator). Read that file's
+  # header before rotating the password: Grafana ignores a new one until it's
+  # reset inside the pod.
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
 
   resources:
     requests:

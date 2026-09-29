@@ -28,6 +28,11 @@ spec:
     - repoURL: https://github.com/juan-gar/pi-cluster-gitops.git
       targetRevision: main
       ref: values
+    # Plain manifests beside the chart - currently the ExternalSecret for
+    # Grafana's admin login. Only applied because this source lists it.
+    - repoURL: https://github.com/juan-gar/pi-cluster-gitops.git
+      targetRevision: main
+      path: platform/prometheus
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring
